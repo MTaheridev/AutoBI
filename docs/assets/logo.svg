@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="AutoBI">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#0b1220"/>
+  <rect x="18" y="18" width="92" height="92" rx="20" fill="url(#g)" opacity="0.15"/>
+  <path d="M34 86 L52 42 L70 86" fill="none" stroke="#5eead4" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="52" cy="42" r="6" fill="#fbbf24"/>
+  <path d="M72 86 V54" fill="none" stroke="#94a3b8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M88 86 V66" fill="none" stroke="#94a3b8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M104 86 V46" fill="none" stroke="#2dd4bf" stroke-width="8" stroke-linecap="round"/>
+</svg>

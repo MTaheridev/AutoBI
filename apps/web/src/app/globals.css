@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: #f4f7fb;
+  --surface-muted: #e8eef7;
+  --surface-elevated: #ffffff;
+  --ink: #12203a;
+  --ink-muted: #5b6b86;
+  --line: #d5deea;
+  --bg-glow: radial-gradient(1200px 600px at 10% -10%, #cfe0ff 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #d7f3ef 0%, transparent 50%),
+    linear-gradient(180deg, #f7faff 0%, #eef3f9 100%);
+}
+
+.dark {
+  --surface: #0b1220;
+  --surface-muted: #121a2b;
+  --surface-elevated: #162033;
+  --ink: #e8eef8;
+  --ink-muted: #9aa8c0;
+  --line: #243049;
+  --bg-glow: radial-gradient(1000px 500px at 0% 0%, #1a2b55 0%, transparent 55%),
+    radial-gradient(800px 400px at 100% 0%, #14363a 0%, transparent 50%),
+    linear-gradient(180deg, #0b1220 0%, #0e1626 100%);
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  color: var(--ink);
+  background: var(--bg-glow);
+  background-attachment: fixed;
+}
+
+@layer utilities {
+  .panel {
+    @apply rounded-2xl border border-line bg-surface-elevated shadow-soft;
+  }
+}

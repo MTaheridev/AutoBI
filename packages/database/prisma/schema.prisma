@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  Owner
+  Admin
+  Member
+  Viewer
+}
+
+enum DataSourceType {
+  postgresql
+  mysql
+  mariadb
+  sqlserver
+}
+
+enum ConnectionStatus {
+  unknown
+  connected
+  failed
+}
+
+enum IntrospectionStatus {
+  idle
+  running
+  succeeded
+  failed
+}
+
+enum AiProviderName {
+  openai
+  openrouter
+}
+
+enum SemanticStatus {
+  Proposed
+  Approved
+  Rejected
+}
+
+enum SemanticSource {
+  ai
+  user
+  inferred
+}
+
+enum QueryRunStatus {
+  queued
+  running
+  succeeded
+  failed
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  email        String       @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  ownedWorkspaces Workspace[] @relation("WorkspaceOwner")
+  memberships  Membership[]
+  auditLogs    AuditLog[]
+}
+
+model Workspace {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  ownerId   String       @db.Uuid
+  owner     User         @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  memberships Membership[]
+  aiProviders AIProviderConfig[]
+  dataSources DataSource[]
+  semanticModels SemanticModel[]
+  queryDefinitions QueryDefinition[]
+  dashboards Dashboard[]
+  conversations Conversation[]
+  auditLogs AuditLog[]
+
+  @@index([ownerId])
+}
+
+model Membership {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @db.Uuid
+  userId      String        @db.Uuid
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model AIProviderConfig {
+  id            String         @id @default(uuid()) @db.Uuid
+  workspaceId   String         @db.Uuid
+  provider      AiProviderName
+  encryptedKey  String
+  model         String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider])
+  @@index([workspaceId])
+}
+
+model DataSource {
+  id                  String              @id @default(uuid()) @db.Uuid
+  workspaceId         String              @db.Uuid
+  name                String
+  type                DataSourceType
+  encryptedConfig     String
+  host                String
+  port                Int
+  databaseName        String
+  username            String
+  ssl                 Boolean             @default(false)
+  schemaName          String?
+  connectionStatus    ConnectionStatus    @default(unknown)
+  introspectionStatus IntrospectionStatus @default(idle)
+  lastError           String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  workspace           Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  schemaSnapshots     SchemaSnapshot[]
+  semanticModels      SemanticModel[]
+  queryDefinitions    QueryDefinition[]
+  conversations       Conversation[]
+
+  @@index([workspaceId])
+}
+
+model SchemaSnapshot {
+  id           String     @id @default(uuid()) @db.Uuid
+  dataSourceId String     @db.Uuid
+  version      Int
+  metadata     Json
+  createdAt    DateTime   @default(now())
+  dataSource   DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([dataSourceId, version])
+  @@index([dataSourceId])
+}
+
+model SemanticModel {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  dataSourceId String   @db.Uuid
+  name         String
+  description  String?
+  version      Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource   DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  entities     SemanticEntity[]
+  metrics      Metric[]
+  dimensions   Dimension[]
+  relationships SemanticRelationship[]
+
+  @@index([workspaceId])
+  @@index([dataSourceId])
+}
+
+model SemanticEntity {
+  id              String         @id @default(uuid()) @db.Uuid
+  semanticModelId String         @db.Uuid
+  name            String
+  description     String?
+  tableRef        String
+  status          SemanticStatus @default(Proposed)
+  source          SemanticSource @default(ai)
+  definition      Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  semanticModel   SemanticModel  @relation(fields: [semanticModelId], references: [id], onDelete: Cascade)
+
+  @@index([semanticModelId])
+  @@index([semanticModelId, status])
+}
+
+model Metric {
+  id              String         @id @default(uuid()) @db.Uuid
+  semanticModelId String         @db.Uuid
+  name            String
+  description     String?
+  expression      String
+  aggregation     String
+  entityName      String?
+  status          SemanticStatus @default(Proposed)
+  source          SemanticSource @default(ai)
+  definition      Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  semanticModel   SemanticModel  @relation(fields: [semanticModelId], references: [id], onDelete: Cascade)
+
+  @@index([semanticModelId])
+  @@index([semanticModelId, status])
+}
+
+model Dimension {
+  id              String         @id @default(uuid()) @db.Uuid
+  semanticModelId String         @db.Uuid
+  name            String
+  description     String?
+  field           String
+  entityName      String?
+  status          SemanticStatus @default(Proposed)
+  source          SemanticSource @default(ai)
+  definition      Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  semanticModel   SemanticModel  @relation(fields: [semanticModelId], references: [id], onDelete: Cascade)
+
+  @@index([semanticModelId])
+  @@index([semanticModelId, status])
+}
+
+model SemanticRelationship {
+  id              String         @id @default(uuid()) @db.Uuid
+  semanticModelId String         @db.Uuid
+  name            String?
+  fromEntity      String
+  toEntity        String
+  fromField       String
+  toField         String
+  status          SemanticStatus @default(Proposed)
+  source          SemanticSource @default(ai)
+  definition      Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  semanticModel   SemanticModel  @relation(fields: [semanticModelId], references: [id], onDelete: Cascade)
+
+  @@index([semanticModelId])
+  @@index([semanticModelId, status])
+}
+
+model QueryDefinition {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @db.Uuid
+  dataSourceId    String   @db.Uuid
+  semanticModelId String?  @db.Uuid
+  dashboardId     String?  @db.Uuid
+  name            String
+  plan            Json
+  compiledSql     String?
+  dialect         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource      DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  dashboard       Dashboard? @relation(fields: [dashboardId], references: [id], onDelete: SetNull)
+  runs            QueryRun[]
+
+  @@index([workspaceId])
+  @@index([dataSourceId])
+  @@index([dashboardId])
+}
+
+model QueryRun {
+  id                String         @id @default(uuid()) @db.Uuid
+  queryDefinitionId String         @db.Uuid
+  status            QueryRunStatus @default(queued)
+  durationMs        Int?
+  rowCount          Int?
+  truncated         Boolean        @default(false)
+  error             String?
+  resultPreview     Json?
+  compiledSql       String?
+  createdAt         DateTime       @default(now())
+  queryDefinition   QueryDefinition @relation(fields: [queryDefinitionId], references: [id], onDelete: Cascade)
+
+  @@index([queryDefinitionId])
+  @@index([status])
+}
+
+model Dashboard {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  name           String
+  description    String?
+  currentVersion Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions       DashboardVersion[]
+  queries        QueryDefinition[]
+
+  @@index([workspaceId])
+}
+
+model DashboardVersion {
+  id          String    @id @default(uuid()) @db.Uuid
+  dashboardId String    @db.Uuid
+  version     Int
+  spec        Json
+  createdAt   DateTime  @default(now())
+  dashboard   Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@unique([dashboardId, version])
+  @@index([dashboardId])
+}
+
+model Conversation {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  dataSourceId String?  @db.Uuid
+  title        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource   DataSource? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+  messages     Message[]
+
+  @@index([workspaceId])
+}
+
+model Message {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @db.Uuid
+  role           String
+  content        String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+model AuditLog {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String?   @db.Uuid
+  actorId     String?   @db.Uuid
+  action      String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  actor       User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([actorId])
+}

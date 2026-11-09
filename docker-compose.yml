@@ -1,0 +1,154 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: autobi
+      POSTGRES_PASSWORD: autobi
+      POSTGRES_DB: autobi
+    ports:
+      - '5432:5432'
+    volumes:
+      - autobi_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U autobi -d autobi']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - autobi_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://autobi:autobi@postgres:5432/autobi?schema=public
+      REDIS_URL: redis://redis:6379
+      API_CORS_ORIGIN: http://localhost:3000
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "pnpm --filter @autobi/database migrate:deploy && pnpm --filter @autobi/api dev"
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://autobi:autobi@postgres:5432/autobi?schema=public
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "pnpm --filter @autobi/worker dev"
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - '3000:3000'
+    depends_on:
+      - api
+    command: sh -c "pnpm --filter @autobi/web dev"
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  # Optional integration-test databases
+  mysql_test:
+    profiles: ['integration']
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: autobi_test
+      MYSQL_USER: autobi
+      MYSQL_PASSWORD: autobi
+    ports:
+      - '3307:3306'
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-proot']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mariadb_test:
+    profiles: ['integration']
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: autobi_test
+      MARIADB_USER: autobi
+      MARIADB_PASSWORD: autobi
+    ports:
+      - '3308:3306'
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  sqlserver_test:
+    profiles: ['integration']
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_SA_PASSWORD: 'AutoBI_Test_123'
+    ports:
+      - '1433:1433'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'AutoBI_Test_123' -C -Q 'SELECT 1' || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  postgres_test:
+    profiles: ['integration']
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: autobi
+      POSTGRES_PASSWORD: autobi
+      POSTGRES_DB: autobi_test
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U autobi -d autobi_test']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  autobi_pg_data:
+  autobi_redis_data:
