@@ -64,6 +64,10 @@ RUN_CONNECTOR_INTEGRATION=1 pnpm --filter @autobi/connectors test
 
 Root [README.md](../README.md) is the public landing page. Assets live in [docs/assets](assets/). Docs index: [README.md](README.md).
 
+## Production readiness
+
+See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the full gap analysis (blockers, phases, test inventory).
+
 ## Notes
 
 - Do not use Prisma against customer databases

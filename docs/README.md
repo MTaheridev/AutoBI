@@ -26,7 +26,10 @@ The root [README](../README.md) is the GitHub landing page.
 | [DATABASE.md](DATABASE.md) | Prisma / internal Postgres |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local setup and commands |
 | [PRD.md](PRD.md) | Product requirements summary |
+| [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) | Code review · gap to production |
 
 ## Status
 
 MVP complete (Sprints 1–4). No required Sprint 5 in the original scope.
+
+Production: **not ready** for public multi-tenant deploy — see [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).

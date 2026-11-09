@@ -209,6 +209,7 @@ Optional later: richer joins, NL dashboard edit, invites, e2e hardening, desktop
 | [Database](docs/DATABASE.md) | Prisma / app DB |
 | [Development](docs/DEVELOPMENT.md) | Local workflow |
 | [PRD](docs/PRD.md) | Product requirements |
+| [Production readiness](docs/PRODUCTION_READINESS.md) | Gap analysis to ship |
 
 ---
 
