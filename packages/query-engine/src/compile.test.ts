@@ -15,6 +15,7 @@ const ctx = {
         { name: 'amount' },
         { name: 'status' },
         { name: 'created_at' },
+        { name: 'customer_id' },
       ],
     },
   ],
@@ -55,7 +56,50 @@ describe('buildCompiledQuery', () => {
     expect(() => assertSafeSelectSql(compiled.sql)).not.toThrow();
   });
 
-  it('rejects multi-table plans', () => {
+  it('compiles multi-table plans with INNER JOIN when relationships exist', () => {
+    const plan = queryPlanSchema.parse({
+      dataSourceId: '22222222-2222-2222-2222-222222222222',
+      metrics: [
+        {
+          expression: 'public.orders.amount',
+          aggregation: 'sum',
+          alias: 'revenue',
+        },
+      ],
+      dimensions: [{ field: 'public.customers.name', alias: 'customer' }],
+      limit: 10,
+    });
+
+    const multiCtx = {
+      ...ctx,
+      tables: [
+        ...ctx.tables,
+        {
+          schema: 'public',
+          name: 'customers',
+          columns: [{ name: 'id' }, { name: 'name' }],
+        },
+      ],
+      relationships: [
+        {
+          sourceSchema: 'public',
+          sourceTable: 'orders',
+          sourceColumn: 'customer_id',
+          targetSchema: 'public',
+          targetTable: 'customers',
+          targetColumn: 'id',
+        },
+      ],
+    };
+
+    const compiled = buildCompiledQuery(plan, multiCtx);
+    expect(compiled.sql).toContain('INNER JOIN');
+    expect(compiled.sql).toContain('"public"."customers"');
+    expect(compiled.sql).toContain('"public"."orders"."customer_id"');
+    expect(() => assertSafeSelectSql(compiled.sql)).not.toThrow();
+  });
+
+  it('rejects multi-table plans without a relationship path', () => {
     const plan = queryPlanSchema.parse({
       dataSourceId: '22222222-2222-2222-2222-222222222222',
       metrics: [
@@ -75,9 +119,10 @@ describe('buildCompiledQuery', () => {
         ...ctx.tables,
         { schema: 'public', name: 'customers', columns: [{ name: 'name' }] },
       ],
+      relationships: [],
     };
 
-    expect(() => buildCompiledQuery(plan, multiCtx)).toThrow(/Multi-table/);
+    expect(() => buildCompiledQuery(plan, multiCtx)).toThrow(/relationship path/);
   });
 });
 

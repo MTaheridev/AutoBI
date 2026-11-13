@@ -9,8 +9,14 @@ export const connectionConfigSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
   ssl: z.boolean().optional(),
+  sslAllowInsecure: z.boolean().optional(),
   schema: z.string().optional(),
   connectionTimeoutMs: z.number().int().positive().optional(),
+});
+
+/** Update may omit password to keep the stored secret. */
+export const connectionConfigUpdateSchema = connectionConfigSchema.extend({
+  password: z.string().optional(),
 });
 
 export const createDataSourceSchema = z.object({
@@ -22,8 +28,26 @@ export const createDataSourceSchema = z.object({
 
 export const updateDataSourceSchema = z.object({
   name: z.string().min(1).max(120).optional(),
-  config: connectionConfigSchema.optional(),
+  config: connectionConfigUpdateSchema.optional(),
 });
+
+export const testDataSourceSchema = z
+  .object({
+    workspaceId: z.string().uuid(),
+    type: z.enum(dataSourceTypes),
+    /** When set, blank password merges with the stored secret for this data source. */
+    dataSourceId: z.string().uuid().optional(),
+    config: connectionConfigUpdateSchema,
+  })
+  .superRefine((value, ctx) => {
+    if (!value.dataSourceId && !value.config.password?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Password is required when testing a new connection',
+        path: ['config', 'password'],
+      });
+    }
+  });
 
 export const dataSourceSchema = z.object({
   id: z.string().uuid(),
@@ -82,7 +106,9 @@ export const schemaSnapshotSchema = z.object({
 });
 
 export type ConnectionConfig = z.infer<typeof connectionConfigSchema>;
+export type ConnectionConfigUpdate = z.infer<typeof connectionConfigUpdateSchema>;
 export type CreateDataSourceInput = z.infer<typeof createDataSourceSchema>;
 export type UpdateDataSourceInput = z.infer<typeof updateDataSourceSchema>;
+export type TestDataSourceInput = z.infer<typeof testDataSourceSchema>;
 export type DataSourceDto = z.infer<typeof dataSourceSchema>;
 export type SchemaSnapshotDto = z.infer<typeof schemaSnapshotSchema>;

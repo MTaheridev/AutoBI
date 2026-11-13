@@ -1,7 +1,8 @@
 import { ValidationError } from '@autobi/shared';
 import type { QueryCompileContext } from './context.js';
 import { tableKey } from './context.js';
-import { parseFieldRef, quoteField, quoteIdent, quoteTable } from './identifiers.js';
+import { parseFieldRef, quoteField, quoteIdent } from './identifiers.js';
+import { buildJoinSql } from './joins.js';
 import type { ConnectorDialect, QueryPlan } from './plan.js';
 import { resolveQueryPlan, type ResolvedPlan } from './resolve.js';
 import { assertSafeSelectSql, MAX_LIMIT } from './safety.js';
@@ -90,14 +91,11 @@ export function compileResolvedPlan(
     throw new ValidationError('Query plan references no tables');
   }
 
-  if (tables.size > 1) {
-    throw new ValidationError(
-      'Multi-table query plans are not supported yet. Use fields from a single table.',
-    );
-  }
-
-  const fromTable = [...tables.values()][0]!;
-  const fromSql = quoteTable(dialect, fromTable);
+  const { fromSql, joinSql } = buildJoinSql(
+    dialect,
+    [...tables.values()],
+    ctx.relationships ?? [],
+  );
 
   const whereParts: string[] = [];
   for (const filter of plan.filters) {
@@ -162,7 +160,7 @@ export function compileResolvedPlan(
   const selectList = selectParts.join(', ');
   const top = dialect === 'sqlserver' ? `TOP (${Math.min(plan.limit, MAX_LIMIT)}) ` : '';
 
-  let sql = `SELECT ${top}${selectList} FROM ${fromSql}`;
+  let sql = `SELECT ${top}${selectList} FROM ${fromSql}${joinSql}`;
   if (whereParts.length) sql += ` WHERE ${whereParts.join(' AND ')}`;
   if (groupParts.length) sql += ` GROUP BY ${groupParts.join(', ')}`;
   if (orderParts.length) sql += ` ORDER BY ${orderParts.join(', ')}`;

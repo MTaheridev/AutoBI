@@ -27,4 +27,4 @@ AutoBI connects to existing databases and generates interactive, editable dashbo
 - **Sprint 3:** Query plans, dialect SQL compile, safe execute, run history
 - **Sprint 4:** Dashboard specs, widget registry, NL generate, editable layout versions
 
-**MVP complete.** No further required sprints in the original scope.
+**v1.0.0 shipped.** Original primary journey (connect → semantics → query → dashboards) is complete.

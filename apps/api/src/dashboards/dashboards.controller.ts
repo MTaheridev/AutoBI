@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   createDashboardSchema,
+  editDashboardSchema,
   generateDashboardSchema,
   updateDashboardSchema,
   type DashboardSpecInput,
@@ -21,6 +22,8 @@ import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PrismaService } from '../core/prisma.service.js';
 import { DashboardsService } from './dashboards.service.js';
+import { assertWorkspaceRole } from '../common/membership.js';
+import { WorkspaceThrottleService } from '../core/workspace-throttle.service.js';
 
 @Controller()
 @UseGuards(AuthGuard)
@@ -28,17 +31,16 @@ export class DashboardsController {
   constructor(
     private readonly dashboards: DashboardsService,
     private readonly prisma: PrismaService,
+    private readonly throttle: WorkspaceThrottleService,
   ) {}
 
-  private async assertMembership(userId: string, workspaceId: string, write = false) {
-    const membership = await this.prisma.membership.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
-    if (!membership) throw new NotFoundError('Workspace not found');
-    if (write && membership.role === 'Viewer') {
-      throw new ForbiddenError('Viewers cannot modify dashboards');
-    }
-    return membership;
+  private assertMembership(userId: string, workspaceId: string, write = false) {
+    return assertWorkspaceRole(
+      this.prisma,
+      userId,
+      workspaceId,
+      write ? 'Member' : 'Viewer',
+    );
   }
 
   private async workspaceOf(id: string) {
@@ -137,6 +139,24 @@ export class DashboardsController {
     },
   ) {
     await this.assertMembership(req.userId, body.workspaceId, true);
+    await this.throttle.assert(body.workspaceId, 'aiDashboard', req.userId);
     return this.dashboards.generate(body);
+  }
+
+  @Post('ai/edit-dashboard')
+  async edit(
+    @Req() req: AuthenticatedRequest,
+    @Body(new ZodValidationPipe(editDashboardSchema))
+    body: {
+      workspaceId: string;
+      dashboardId: string;
+      prompt: string;
+      useAi?: boolean;
+      provider?: 'openai' | 'openrouter';
+    },
+  ) {
+    await this.assertMembership(req.userId, body.workspaceId, true);
+    await this.throttle.assert(body.workspaceId, 'aiDashboard', req.userId);
+    return this.dashboards.edit(body);
   }
 }

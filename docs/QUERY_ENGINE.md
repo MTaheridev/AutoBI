@@ -8,7 +8,7 @@ Sprint 3 delivers validated analytical query plans, dialect SQL compilation, saf
 
 - `queryPlanSchema` — structured plans (not raw SQL from clients/AI)
 - Schema allow-list resolution
-- Semantic `metricId` resolution (prefers Approved)
+- Semantic `metricId` resolution (Approved only when `preferApprovedSemantics`; no Proposed fallback)
 - Dialect compilers: PostgreSQL, MySQL, MariaDB, SQL Server
 - Safety checks: SELECT-only, no multi-statements, forbidden keyword block, parameterized filters, max limit
 
@@ -25,11 +25,15 @@ Sprint 3 delivers validated analytical query plans, dialect SQL compilation, saf
 }
 ```
 
-## Limits (Sprint 3)
+## Joins (Phase 3)
 
-- Single-table plans only (joins deferred)
+Multi-table plans compile `INNER JOIN` clauses from schema-snapshot FKs plus **Approved** semantic relationships (entity `tableRef` + from/to fields), via `packages/query-engine/src/joins.ts`. Unconnected tables fail closed.
+
+## Limits
+
 - No arbitrary SQL execution endpoint for AI
 - Result previews capped in API responses
+- Workspace execute concurrency capped; pooled connectors reuse connections per data source
 
 ## API
 

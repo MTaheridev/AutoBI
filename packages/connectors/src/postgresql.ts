@@ -1,6 +1,10 @@
 import pg from 'pg';
-import { ConnectorError } from '@autobi/shared';
+import { ConnectorError, sanitizeClientError } from '@autobi/shared';
+import { inferRelationshipsFromColumns } from './infer-relationships.js';
 import { normalizeDataType } from './normalize.js';
+import { readonlyResult, writableResult } from './privilege-probe.js';
+import { pgSslOption } from './ssl.js';
+import { withQueryTimeout } from './timeout.js';
 import type {
   CompiledQuery,
   ConnectionConfig,
@@ -32,7 +36,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
       database: config.database,
       user: config.username,
       password: config.password,
-      ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
+      ssl: pgSslOption(config),
       connectionTimeoutMillis: config.connectionTimeoutMs ?? 10_000,
       statement_timeout: 30_000,
     });
@@ -52,22 +56,24 @@ export class PostgreSQLConnector implements DatabaseConnector {
       database: config.database,
       user: config.username,
       password: config.password,
-      ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
+      ssl: pgSslOption(config),
       connectionTimeoutMillis: config.connectionTimeoutMs ?? 10_000,
     });
     try {
       await client.connect();
       const result = await client.query('SELECT version() AS version');
+      const privilege = await probePostgresReadonly(client);
       return {
         ok: true,
         message: 'Connection successful',
         latencyMs: Date.now() - started,
         serverVersion: String(result.rows[0]?.version ?? ''),
+        ...privilege,
       };
     } catch (error) {
       return {
         ok: false,
-        message: error instanceof Error ? error.message : 'Connection failed',
+        message: sanitizeClientError(error, 'Connection failed'),
         latencyMs: Date.now() - started,
       };
     } finally {
@@ -221,9 +227,11 @@ export class PostgreSQLConnector implements DatabaseConnector {
       }
     }
 
-    const relationships = (await this.getRelationships()).filter((rel) =>
+    const explicit = (await this.getRelationships()).filter((rel) =>
       schemaNames.some((s) => s.name === rel.sourceSchema),
     );
+    const inferred = inferRelationshipsFromColumns(tables, explicit);
+    const relationships = [...explicit, ...inferred];
 
     return { schemas: schemaNames, tables, relationships };
   }
@@ -234,11 +242,17 @@ export class PostgreSQLConnector implements DatabaseConnector {
   ): Promise<QueryResult> {
     const client = this.requireClient();
     const maxRows = options.maxRows ?? 1000;
-    const result = await client.query({
-      text: query.sql,
-      values: query.params,
-      rowMode: 'array',
-    });
+    const timeoutMs = options.timeoutMs ?? 30_000;
+    await client.query(`SET statement_timeout = ${Math.max(1, Math.floor(timeoutMs))}`);
+    const result = await withQueryTimeout(
+      client.query({
+        text: query.sql,
+        values: query.params,
+        rowMode: 'array',
+      }),
+      timeoutMs,
+      options.signal,
+    );
     const truncated = result.rows.length > maxRows;
     const sliced = result.rows.slice(0, maxRows);
     const columns = result.fields.map((f) => f.name);
@@ -257,6 +271,39 @@ export class PostgreSQLConnector implements DatabaseConnector {
       await this.client.end().catch(() => undefined);
       this.client = null;
     }
+  }
+}
+
+async function probePostgresReadonly(client: pg.Client) {
+  try {
+    const role = await client.query<{
+      is_super: boolean;
+      can_createdb: boolean;
+      can_create: boolean;
+    }>(
+      `SELECT
+         current_setting('is_superuser') = 'on' AS is_super,
+         COALESCE((SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user), false) AS can_createdb,
+         has_database_privilege(current_user, current_database(), 'CREATE') AS can_create`,
+    );
+    const row = role.rows[0];
+    if (row?.is_super || row?.can_createdb || row?.can_create) {
+      return writableResult();
+    }
+
+    const writes = await client.query<{ ok: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM information_schema.role_table_grants
+         WHERE grantee = current_user
+           AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER')
+       ) AS ok`,
+    );
+    if (writes.rows[0]?.ok) return writableResult();
+    return readonlyResult();
+  } catch {
+    // If privilege catalog is inaccessible, do not claim readonly.
+    return writableResult();
   }
 }
 

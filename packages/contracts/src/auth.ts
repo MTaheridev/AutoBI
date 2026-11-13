@@ -1,9 +1,23 @@
 import { z } from 'zod';
 
+/** Min 10 chars, upper, lower, digit. */
+export const passwordSchema = z
+  .string()
+  .min(10, 'Password must be at least 10 characters')
+  .max(128)
+  .regex(/[a-z]/, 'Password must include a lowercase letter')
+  .regex(/[A-Z]/, 'Password must include an uppercase letter')
+  .regex(/[0-9]/, 'Password must include a digit');
+
 export const registerSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8).max(128),
+  password: passwordSchema,
   name: z.string().min(1).max(120).optional(),
+  inviteToken: z.string().min(10).optional(),
+});
+
+export const verifyEmailSchema = z.object({
+  token: z.string().min(10),
 });
 
 export const loginSchema = z.object({
@@ -15,6 +29,7 @@ export const userSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   name: z.string().nullable(),
+  emailVerifiedAt: z.string().nullable().optional(),
   createdAt: z.string(),
 });
 

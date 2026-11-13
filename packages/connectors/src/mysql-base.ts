@@ -1,6 +1,10 @@
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
-import { ConnectorError } from '@autobi/shared';
+import { ConnectorError, sanitizeClientError } from '@autobi/shared';
+import { inferRelationshipsFromColumns } from './infer-relationships.js';
 import { normalizeDataType } from './normalize.js';
+import { mysqlGrantsLookWritable, readonlyResult, writableResult } from './privilege-probe.js';
+import { mysqlSslOption } from './ssl.js';
+import { withQueryTimeout } from './timeout.js';
 import type {
   CompiledQuery,
   ConnectionConfig,
@@ -31,7 +35,7 @@ export class MySqlFamilyConnector implements DatabaseConnector {
       database: config.database,
       user: config.username,
       password: config.password,
-      ssl: config.ssl ? {} : undefined,
+      ssl: mysqlSslOption(config),
       connectTimeout: config.connectionTimeoutMs ?? 10_000,
     });
   }
@@ -53,20 +57,22 @@ export class MySqlFamilyConnector implements DatabaseConnector {
         database: config.database,
         user: config.username,
         password: config.password,
-        ssl: config.ssl ? {} : undefined,
+        ssl: mysqlSslOption(config),
         connectTimeout: config.connectionTimeoutMs ?? 10_000,
       });
       const [rows] = await connection.query<RowDataPacket[]>('SELECT VERSION() AS version');
+      const privilege = await probeMysqlReadonly(connection);
       return {
         ok: true,
         message: 'Connection successful',
         latencyMs: Date.now() - started,
         serverVersion: String(rows[0]?.version ?? ''),
+        ...privilege,
       };
     } catch (error) {
       return {
         ok: false,
-        message: error instanceof Error ? error.message : 'Connection failed',
+        message: sanitizeClientError(error, 'Connection failed'),
         latencyMs: Date.now() - started,
       };
     } finally {
@@ -187,9 +193,11 @@ export class MySqlFamilyConnector implements DatabaseConnector {
       }
     }
 
-    const relationships = (await this.getRelationships()).filter((rel) =>
+    const explicit = (await this.getRelationships()).filter((rel) =>
       schemaNames.some((s) => s.name === rel.sourceSchema),
     );
+    const inferred = inferRelationshipsFromColumns(tables, explicit);
+    const relationships = [...explicit, ...inferred];
 
     return { schemas: schemaNames, tables, relationships };
   }
@@ -200,10 +208,24 @@ export class MySqlFamilyConnector implements DatabaseConnector {
   ): Promise<QueryResult> {
     const connection = this.requireConnection();
     const maxRows = options.maxRows ?? 1000;
-    const [rows, fields] = await connection.query({
-      sql: query.sql,
-      values: query.params,
-    });
+    const timeoutMs = options.timeoutMs ?? 30_000;
+    if (this.type === 'mariadb') {
+      await connection
+        .query(`SET SESSION max_statement_time = ${Math.max(1, Math.ceil(timeoutMs / 1000))}`)
+        .catch(() => undefined);
+    } else {
+      await connection
+        .query(`SET SESSION max_execution_time = ${Math.max(1, Math.floor(timeoutMs))}`)
+        .catch(() => undefined);
+    }
+    const [rows, fields] = await withQueryTimeout(
+      connection.query({
+        sql: query.sql,
+        values: query.params,
+      }),
+      timeoutMs,
+      options.signal,
+    );
     const list = Array.isArray(rows) ? (rows as RowDataPacket[]) : [];
     const truncated = list.length > maxRows;
     const sliced = list.slice(0, maxRows);
@@ -225,5 +247,16 @@ export class MySqlFamilyConnector implements DatabaseConnector {
       await this.connection.end().catch(() => undefined);
       this.connection = null;
     }
+  }
+}
+
+async function probeMysqlReadonly(connection: Connection) {
+  try {
+    const [rows] = await connection.query<RowDataPacket[]>('SHOW GRANTS');
+    const grants = rows.map((row) => String(Object.values(row)[0] ?? ''));
+    if (mysqlGrantsLookWritable(grants)) return writableResult();
+    return readonlyResult();
+  } catch {
+    return writableResult();
   }
 }

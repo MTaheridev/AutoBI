@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
-import { Badge, Button, EmptyState, Field, Input, Select } from '@/components/ui';
+import { Badge, Button, EmptyState, Field, Input, PageHeader, Select } from '@/components/ui';
 
 interface DataSource {
   id: string;
@@ -50,6 +50,8 @@ export default function SemanticModelsPage() {
       if (!dataSourceId && dsRes.dataSources[0]) {
         setDataSourceId(dsRes.dataSources[0].id);
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -95,13 +97,10 @@ export default function SemanticModelsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-semibold">Semantic models</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Propose business entities, metrics, and dimensions from introspected schemas. Approvals
-          stay human-controlled.
-        </p>
-      </div>
+      <PageHeader
+        title="Semantic models"
+        description="Propose business entities, metrics, and dimensions from introspected schemas. Approvals stay human-controlled."
+      />
 
       <form className="panel grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto]" onSubmit={onCreate}>
         <Field label="Model name">

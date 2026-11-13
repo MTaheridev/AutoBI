@@ -7,8 +7,15 @@ export interface ConnectionConfig {
   username: string;
   password: string;
   ssl?: boolean;
+  /** When true with ssl, skip certificate verification (explicit opt-in only). */
+  sslAllowInsecure?: boolean;
   schema?: string;
   connectionTimeoutMs?: number;
+}
+
+export interface ConnectionTestWarning {
+  code: 'NOT_READONLY';
+  message: string;
 }
 
 export interface ConnectionTestResult {
@@ -16,6 +23,9 @@ export interface ConnectionTestResult {
   message: string;
   latencyMs?: number;
   serverVersion?: string;
+  /** True when privilege probe found no obvious write capability. */
+  readonlyLikely?: boolean;
+  warnings?: ConnectionTestWarning[];
 }
 
 export interface DatabaseSchema {

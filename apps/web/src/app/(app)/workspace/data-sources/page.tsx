@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, formatApiError } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
-import { Badge, Button, EmptyState } from '@/components/ui';
+import { Badge, Button, EmptyState, InlineError, PageHeader } from '@/components/ui';
 
 interface DataSource {
   id: string;
@@ -27,12 +27,15 @@ export default function DataSourcesPage() {
   const { current } = useWorkspace();
   const [items, setItems] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!current) return;
     setLoading(true);
+    setError(null);
     api<{ dataSources: DataSource[] }>(`/data-sources?workspaceId=${current.id}`)
       .then((data) => setItems(data.dataSources))
+      .catch((err) => setError(formatApiError(err, 'Failed to load')))
       .finally(() => setLoading(false));
   }, [current?.id]);
 
@@ -47,21 +50,21 @@ export default function DataSourcesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-semibold">Data sources</h1>
-          <p className="mt-1 text-sm text-ink-muted">
-            Connect relational databases and inspect their schemas.
-          </p>
-        </div>
-        <Link href="/workspace/data-sources/new">
-          <Button>Add data source</Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="Data sources"
+        description="Connect relational databases and inspect their schemas."
+        actions={
+          <Link href="/workspace/data-sources/new">
+            <Button>Add data source</Button>
+          </Link>
+        }
+      />
+
+      {error ? <InlineError>{error}</InlineError> : null}
 
       {loading ? (
         <p className="text-sm text-ink-muted">Loading…</p>
-      ) : !items.length ? (
+      ) : !items.length && !error ? (
         <EmptyState
           title="No data sources yet"
           description="Register PostgreSQL, MySQL, MariaDB, or SQL Server."
@@ -83,9 +86,9 @@ export default function DataSourcesPage() {
                 <th className="px-4 py-3 font-medium">Schema</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="list-stagger">
               {items.map((ds) => (
-                <tr key={ds.id} className="border-b border-line last:border-0">
+                <tr key={ds.id} className="list-stagger__item border-b border-line last:border-0">
                   <td className="px-4 py-3">
                     <Link
                       className="font-medium text-brand-700 hover:underline dark:text-brand-300"

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
-import { Badge, Button, EmptyState } from '@/components/ui';
+import { Badge, Button, EmptyState, PageHeader } from '@/components/ui';
 
 interface QueryItem {
   id: string;
@@ -18,12 +18,15 @@ export default function QueriesPage() {
   const { current } = useWorkspace();
   const [items, setItems] = useState<QueryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!current) return;
     setLoading(true);
+    setError(null);
     api<{ queries: QueryItem[] }>(`/queries?workspaceId=${current.id}`)
       .then((data) => setItems(data.queries))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'))
       .finally(() => setLoading(false));
   }, [current?.id]);
 
@@ -38,21 +41,25 @@ export default function QueriesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-semibold">Queries</h1>
-          <p className="mt-1 text-sm text-ink-muted">
-            Build validated analytical plans, compile dialect SQL, and execute safely.
-          </p>
-        </div>
-        <Link href="/workspace/queries/new">
-          <Button>New query</Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="Queries"
+        description="Build validated analytical plans, compile dialect SQL, and execute safely."
+        actions={
+          <Link href="/workspace/queries/new">
+            <Button>New query</Button>
+          </Link>
+        }
+      />
+
+      {error ? (
+        <p className="text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      ) : null}
 
       {loading ? (
         <p className="text-sm text-ink-muted">Loading…</p>
-      ) : !items.length ? (
+      ) : !items.length && !error ? (
         <EmptyState
           title="No queries yet"
           description="Create a query plan from schema fields or approved metrics."

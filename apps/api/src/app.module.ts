@@ -6,6 +6,7 @@ import { DataSourcesModule } from './data-sources/data-sources.module.js';
 import { SemanticModule } from './semantic/semantic.module.js';
 import { QueriesModule } from './queries/queries.module.js';
 import { DashboardsModule } from './dashboards/dashboards.module.js';
+import { AgentModule } from './agent/agent.module.js';
 import { HealthModule } from './health/health.module.js';
 import { CoreModule } from './core/core.module.js';
 
@@ -20,6 +21,7 @@ import { CoreModule } from './core/core.module.js';
     SemanticModule,
     QueriesModule,
     DashboardsModule,
+    AgentModule,
   ],
 })
 export class AppModule {}

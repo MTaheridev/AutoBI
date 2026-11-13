@@ -6,6 +6,7 @@ import {
   proposeFromSchemaHeuristic,
   SEMANTIC_PROPOSAL_SYSTEM,
   semanticProposalSchema,
+  validateProposalAgainstSnapshot,
   type SchemaSnapshotSummary,
   type SemanticProposal,
 } from '@autobi/semantic-engine';
@@ -13,13 +14,30 @@ import { AppError, NotFoundError, ValidationError } from '@autobi/shared';
 import type { AiProviderName, Prisma, SemanticStatus } from '@autobi/database';
 import { PrismaService } from '../core/prisma.service.js';
 import { EncryptionService } from '../core/encryption.service.js';
+import { AuditService } from '../core/audit.service.js';
 
 @Injectable()
 export class SemanticService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly audit: AuditService,
   ) {}
+
+  private async auditStatus(
+    workspaceId: string,
+    kind: string,
+    itemId: string,
+    status: SemanticStatus,
+    actorId?: string,
+  ) {
+    await this.audit.record({
+      action: `semantic.${kind}.${status.toLowerCase()}`,
+      actorId,
+      workspaceId,
+      metadata: { itemId, status },
+    });
+  }
 
   private toModelDto(model: {
     id: string;
@@ -212,6 +230,7 @@ export class SemanticService {
       snapshot,
       options,
     );
+    validateProposalAgainstSnapshot(proposal, snapshot);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.semanticEntity.deleteMany({
@@ -309,7 +328,13 @@ export class SemanticService {
     }
   }
 
-  async updateEntityStatus(workspaceId: string, modelId: string, itemId: string, status: SemanticStatus) {
+  async updateEntityStatus(
+    workspaceId: string,
+    modelId: string,
+    itemId: string,
+    status: SemanticStatus,
+    actorId?: string,
+  ) {
     await this.requireModel(workspaceId, modelId);
     const item = await this.prisma.semanticEntity.findFirst({
       where: { id: itemId, semanticModelId: modelId },
@@ -320,10 +345,17 @@ export class SemanticService {
       where: { id: itemId },
       data: { status },
     });
+    await this.auditStatus(workspaceId, 'entity', itemId, status, actorId);
     return this.toItemDto(updated);
   }
 
-  async updateMetricStatus(workspaceId: string, modelId: string, itemId: string, status: SemanticStatus) {
+  async updateMetricStatus(
+    workspaceId: string,
+    modelId: string,
+    itemId: string,
+    status: SemanticStatus,
+    actorId?: string,
+  ) {
     await this.requireModel(workspaceId, modelId);
     const item = await this.prisma.metric.findFirst({
       where: { id: itemId, semanticModelId: modelId },
@@ -334,6 +366,7 @@ export class SemanticService {
       where: { id: itemId },
       data: { status },
     });
+    await this.auditStatus(workspaceId, 'metric', itemId, status, actorId);
     return this.toItemDto(updated);
   }
 
@@ -342,6 +375,7 @@ export class SemanticService {
     modelId: string,
     itemId: string,
     status: SemanticStatus,
+    actorId?: string,
   ) {
     await this.requireModel(workspaceId, modelId);
     const item = await this.prisma.dimension.findFirst({
@@ -353,6 +387,7 @@ export class SemanticService {
       where: { id: itemId },
       data: { status },
     });
+    await this.auditStatus(workspaceId, 'dimension', itemId, status, actorId);
     return this.toItemDto(updated);
   }
 
@@ -361,6 +396,7 @@ export class SemanticService {
     modelId: string,
     itemId: string,
     status: SemanticStatus,
+    actorId?: string,
   ) {
     await this.requireModel(workspaceId, modelId);
     const item = await this.prisma.semanticRelationship.findFirst({
@@ -372,6 +408,7 @@ export class SemanticService {
       where: { id: itemId },
       data: { status },
     });
+    await this.auditStatus(workspaceId, 'relationship', itemId, status, actorId);
     return this.toItemDto(updated);
   }
 

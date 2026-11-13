@@ -4,8 +4,11 @@ import {
   TYPES,
   type ConnectionConfiguration,
 } from 'tedious';
-import { ConnectorError } from '@autobi/shared';
+import { ConnectorError, sanitizeClientError } from '@autobi/shared';
 import { normalizeDataType } from './normalize.js';
+import { readonlyResult, writableResult } from './privilege-probe.js';
+import { sqlServerTlsOptions } from './ssl.js';
+import { withQueryTimeout } from './timeout.js';
 import type {
   CompiledQuery,
   ConnectionConfig,
@@ -26,7 +29,11 @@ interface TediousColumn {
   value: unknown;
 }
 
-function buildTediousConfig(config: ConnectionConfig): ConnectionConfiguration {
+function buildTediousConfig(
+  config: ConnectionConfig,
+  requestTimeoutMs = 30_000,
+): ConnectionConfiguration {
+  const tls = sqlServerTlsOptions(config);
   return {
     server: config.host,
     authentication: {
@@ -39,10 +46,10 @@ function buildTediousConfig(config: ConnectionConfig): ConnectionConfiguration {
     options: {
       port: config.port,
       database: config.database,
-      encrypt: config.ssl ?? false,
-      trustServerCertificate: true,
+      encrypt: tls.encrypt,
+      trustServerCertificate: tls.trustServerCertificate,
       connectTimeout: config.connectionTimeoutMs ?? 10_000,
-      requestTimeout: 30_000,
+      requestTimeout: requestTimeoutMs,
       rowCollectionOnRequestCompletion: true,
     },
   };
@@ -118,16 +125,18 @@ export class SQLServerConnector implements DatabaseConnector {
     try {
       connection = await connectOnce(config);
       const rows = await execSql<{ version: string }>(connection, 'SELECT @@VERSION AS version');
+      const privilege = await probeSqlServerReadonly(connection);
       return {
         ok: true,
         message: 'Connection successful',
         latencyMs: Date.now() - started,
         serverVersion: rows[0]?.version ?? '',
+        ...privilege,
       };
     } catch (error) {
       return {
         ok: false,
-        message: error instanceof Error ? error.message : 'Connection failed',
+        message: sanitizeClientError(error, 'Connection failed'),
         latencyMs: Date.now() - started,
       };
     } finally {
@@ -296,12 +305,18 @@ export class SQLServerConnector implements DatabaseConnector {
   ): Promise<QueryResult> {
     const connection = this.requireConnection();
     const maxRows = options.maxRows ?? 1000;
+    const timeoutMs = options.timeoutMs ?? 30_000;
     const params = (query.params ?? []).map((value, index) => ({
       name: `p${index + 1}`,
       type: inferTediousType(value),
       value,
     }));
-    const rows = await execSql<Record<string, unknown>>(connection, query.sql, params);
+    // Tedious applies connection requestTimeout; race as a hard upper bound.
+    const rows = await withQueryTimeout(
+      execSql<Record<string, unknown>>(connection, query.sql, params),
+      timeoutMs,
+      options.signal,
+    );
     const truncated = rows.length > maxRows;
     const sliced = rows.slice(0, maxRows);
     const columns = sliced[0] ? Object.keys(sliced[0]) : [];
@@ -313,6 +328,30 @@ export class SQLServerConnector implements DatabaseConnector {
       this.connection.close();
       this.connection = null;
     }
+  }
+}
+
+async function probeSqlServerReadonly(connection: Connection) {
+  try {
+    const roleRows = await execSql<{ is_admin: number }>(
+      connection,
+      `SELECT CASE WHEN IS_SRVROLEMEMBER('sysadmin') = 1 OR IS_MEMBER('db_owner') = 1 THEN 1 ELSE 0 END AS is_admin`,
+    );
+    if (roleRows[0]?.is_admin === 1) return writableResult();
+
+    const permRows = await execSql<{ permission_name: string }>(
+      connection,
+      `SELECT permission_name
+       FROM fn_my_permissions(NULL, 'DATABASE')
+       WHERE permission_name IN (
+         'INSERT', 'UPDATE', 'DELETE', 'ALTER', 'CONTROL', 'CREATE TABLE',
+         'CREATE VIEW', 'CREATE PROCEDURE', 'EXECUTE', 'TAKE OWNERSHIP'
+       )`,
+    );
+    if (permRows.length > 0) return writableResult();
+    return readonlyResult();
+  } catch {
+    return writableResult();
   }
 }
 

@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
-import { api, ApiError } from '@/lib/api';
-import { Button, Field, Input } from '@/components/ui';
+import { api, formatApiError } from '@/lib/api';
+import { AuthFrame } from '@/components/auth-frame';
+import { Button, Field, InlineError, Input } from '@/components/ui';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,48 +23,56 @@ export default function LoginPage() {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
-      router.push('/dashboard');
+      const next = new URLSearchParams(window.location.search).get('next');
+      const safeNext =
+        next && next.startsWith('/') && !next.startsWith('//') ? next : '/workspace/agent';
+      router.push(safeNext);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Login failed');
+      setError(formatApiError(err, 'Login failed'));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
-      <div className="panel w-full max-w-md p-8">
-        <div className="mb-8">
-          <div className="font-display text-2xl font-semibold text-brand-700 dark:text-brand-300">
-            AutoBI
-          </div>
-          <h1 className="mt-3 font-display text-xl font-semibold">Sign in</h1>
-          <p className="mt-1 text-sm text-ink-muted">Access your workspaces and data sources.</p>
-        </div>
-        <form className="space-y-4" onSubmit={onSubmit}>
-          <Field label="Email">
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </Field>
-          <Field label="Password">
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </Field>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <Button className="w-full" disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
-          </Button>
-        </form>
-        <p className="mt-6 text-center text-sm text-ink-muted">
-          No account?{' '}
-          <Link className="text-brand-700 dark:text-brand-300" href="/register">
-            Create one
-          </Link>
+    <AuthFrame
+      title="Sign in"
+      description="Land in Agent Mode — connect a database and ship a dashboard in one conversation."
+      footer={
+        <>
+          No account? <Link href="/register">Create one</Link>
+        </>
+      }
+    >
+      <form className="space-y-4" onSubmit={onSubmit}>
+        <Field label="Email">
+          <Input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@company.com"
+            autoComplete="email"
+            required
+          />
+        </Field>
+        <Field label="Password">
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••••••"
+            autoComplete="current-password"
+            required
+          />
+        </Field>
+        <InlineError>{error}</InlineError>
+        <Button className="w-full bg-brand-500 hover:bg-brand-400" disabled={loading}>
+          {loading ? 'Signing in…' : 'Sign in'}
+        </Button>
+        <p className="data-mono text-center text-[11px] text-ink-muted">
+          Argon2id · Redis session · email verified
         </p>
-      </div>
-    </div>
+      </form>
+    </AuthFrame>
   );
 }

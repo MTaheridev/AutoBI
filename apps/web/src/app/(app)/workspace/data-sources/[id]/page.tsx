@@ -1,19 +1,34 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError } from '@/lib/api';
+import {
+  DataSourceConnectionForm,
+  type ConnectionFormValues,
+  type ConnectionTestResultDto,
+  type DataSourceTypeValue,
+} from '@/components/data-source-connection-form';
+import {
+  Badge,
+  Button,
+  EmptyState,
+  InlineError,
+  InlineSuccess,
+  InlineWarning,
+} from '@/components/ui';
+import { api, formatApiError } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
-import { Badge, Button, EmptyState } from '@/components/ui';
 
 interface DataSource {
   id: string;
   name: string;
-  type: string;
+  type: DataSourceTypeValue;
   host: string;
   port: number;
   database: string;
   username: string;
+  ssl?: boolean;
+  schema?: string;
   connectionStatus: string;
   introspectionStatus: string;
   lastError: string | null;
@@ -51,13 +66,17 @@ interface Snapshot {
 
 export default function DataSourceDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const { current } = useWorkspace();
   const [ds, setDs] = useState<DataSource | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!current) return;
@@ -71,14 +90,18 @@ export default function DataSourceDetailPage() {
     ]);
     setDs(dsRes.dataSource);
     setSnapshot(schemaRes.snapshot);
-    if (schemaRes.snapshot?.tables[0] && !selected) {
-      const t = schemaRes.snapshot.tables[0];
-      setSelected(`${t.schema}.${t.name}`);
+    setLoadError(null);
+    if (schemaRes.snapshot?.tables[0]) {
+      setSelected((prev) => {
+        if (prev) return prev;
+        const t = schemaRes.snapshot!.tables[0];
+        return `${t.schema}.${t.name}`;
+      });
     }
-  }, [current, params.id, selected]);
+  }, [current, params.id]);
 
   useEffect(() => {
-    load().catch(() => undefined);
+    load().catch((err) => setLoadError(formatApiError(err, 'Failed to load data source')));
   }, [load]);
 
   if (!current) {
@@ -90,25 +113,33 @@ export default function DataSourceDetailPage() {
     );
   }
 
+  if (loadError && !ds) {
+    return <InlineError>{loadError}</InlineError>;
+  }
+
   if (!ds) {
     return <p className="text-sm text-ink-muted">Loading…</p>;
   }
+
+  const dataSource = ds;
 
   async function testConnection() {
     if (!current) return;
     setBusy(true);
     setError(null);
     setMessage(null);
+    setWarnings([]);
     try {
-      const data = await api<{ result: { ok: boolean; message: string } }>(
+      const data = await api<{ result: ConnectionTestResultDto }>(
         `/data-sources/${params.id}/test?workspaceId=${current.id}`,
         { method: 'POST' },
       );
       setMessage(data.result.message);
+      setWarnings((data.result.warnings ?? []).map((w) => w.message));
       if (!data.result.ok) setError(data.result.message);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Test failed');
+      setError(formatApiError(err, 'Test failed'));
     } finally {
       setBusy(false);
     }
@@ -119,6 +150,7 @@ export default function DataSourceDetailPage() {
     setBusy(true);
     setError(null);
     setMessage(null);
+    setWarnings([]);
     try {
       const job = await api<{ jobId: string }>(
         `/data-sources/${params.id}/introspect?workspaceId=${current.id}`,
@@ -128,7 +160,7 @@ export default function DataSourceDetailPage() {
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 1000));
         const status = await api<{ status: string; error?: string }>(
-          `/data-sources/jobs/${job.jobId}`,
+          `/data-sources/jobs/${job.jobId}?workspaceId=${current.id}`,
         );
         if (status.status === 'completed') {
           setMessage('Introspection completed');
@@ -142,21 +174,57 @@ export default function DataSourceDetailPage() {
         }
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Introspection failed');
+      setError(formatApiError(err, 'Introspection failed'));
     } finally {
       setBusy(false);
     }
   }
 
-  const selectedTable = snapshot?.tables.find(
-    (t) => `${t.schema}.${t.name}` === selected,
-  );
+  async function onSave(values: ConnectionFormValues) {
+    if (!current) return;
+    await api(`/data-sources/${params.id}?workspaceId=${current.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: values.name,
+        config: {
+          host: values.host,
+          port: values.port,
+          database: values.database,
+          username: values.username,
+          ...(values.password.trim() ? { password: values.password } : {}),
+          ssl: values.ssl,
+          schema: values.schema || undefined,
+        },
+      }),
+    });
+    setEditing(false);
+    setMessage('Connection updated');
+    await load();
+  }
+
+  async function onDelete() {
+    if (!current) return;
+    if (!window.confirm(`Delete data source “${dataSource.name}”? This cannot be undone.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/data-sources/${params.id}?workspaceId=${current.id}`, {
+        method: 'DELETE',
+      });
+      router.push('/workspace/data-sources');
+    } catch (err) {
+      setError(formatApiError(err, 'Delete failed'));
+      setBusy(false);
+    }
+  }
+
+  const selectedTable = snapshot?.tables.find((t) => `${t.schema}.${t.name}` === selected);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-semibold">{ds.name}</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">{ds.name}</h1>
           <p className="mt-1 text-sm text-ink-muted">
             {ds.type} · {ds.host}:{ds.port} / {ds.database} · user {ds.username}
           </p>
@@ -187,7 +255,10 @@ export default function DataSourceDetailPage() {
             </Badge>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" disabled={busy} onClick={() => setEditing((v) => !v)}>
+            {editing ? 'Close editor' : 'Edit connection'}
+          </Button>
           <Button variant="secondary" disabled={busy} onClick={testConnection}>
             Test connection
           </Button>
@@ -197,10 +268,40 @@ export default function DataSourceDetailPage() {
         </div>
       </div>
 
-      {message && <p className="text-sm text-emerald-700 dark:text-emerald-300">{message}</p>}
-      {(error || ds.lastError) && (
-        <p className="text-sm text-red-600">{error ?? ds.lastError}</p>
-      )}
+      {message ? <InlineSuccess>{message}</InlineSuccess> : null}
+      {warnings.map((w) => (
+        <InlineWarning key={w}>{w}</InlineWarning>
+      ))}
+      <InlineError>{error ?? (!message ? ds.lastError : null)}</InlineError>
+
+      {editing ? (
+        <DataSourceConnectionForm
+          key={`${dataSource.id}-${dataSource.host}-${dataSource.port}-${dataSource.username}`}
+          workspaceId={current.id}
+          mode="edit"
+          dataSourceId={dataSource.id}
+          lockType
+          requireTestBeforeSubmit={false}
+          submitLabel="Save changes"
+          initial={{
+            name: dataSource.name,
+            type: dataSource.type,
+            host: dataSource.host,
+            port: dataSource.port,
+            database: dataSource.database,
+            username: dataSource.username,
+            password: '',
+            schema: dataSource.schema ?? '',
+            ssl: dataSource.ssl ?? false,
+          }}
+          onSubmit={onSave}
+          extraActions={
+            <Button type="button" variant="danger" disabled={busy} onClick={onDelete}>
+              Delete
+            </Button>
+          }
+        />
+      ) : null}
 
       {!snapshot ? (
         <EmptyState
@@ -218,11 +319,11 @@ export default function DataSourceDetailPage() {
             <div className="mb-2 px-2 text-xs font-medium uppercase tracking-wide text-ink-muted">
               Tables (v{snapshot.version})
             </div>
-            <ul className="space-y-1">
+            <ul className="space-y-1 list-stagger">
               {snapshot.tables.map((t) => {
                 const key = `${t.schema}.${t.name}`;
                 return (
-                  <li key={key}>
+                  <li key={key} className="list-stagger__item">
                     <button
                       type="button"
                       className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${
@@ -268,9 +369,9 @@ export default function DataSourceDetailPage() {
                     <th className="px-4 py-3 font-medium">Flags</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="list-stagger">
                   {selectedTable.columns.map((c) => (
-                    <tr key={c.name} className="border-b border-line last:border-0">
+                    <tr key={c.name} className="list-stagger__item border-b border-line last:border-0">
                       <td className="px-4 py-2 font-medium">{c.name}</td>
                       <td className="px-4 py-2">{c.dataType}</td>
                       <td className="px-4 py-2 text-ink-muted">{c.nativeDataType}</td>

@@ -330,6 +330,7 @@ export class DashboardsService {
 
     const widgets: DashboardSpec['widgets'] = [];
     const tables = metadata.tables ?? [];
+    const relationships = metadata.relationships ?? [];
 
     for (const w of proposal.widgets) {
       const plan: QueryPlan = queryPlanSchema.parse({
@@ -353,6 +354,7 @@ export class DashboardsService {
         const compiled = buildCompiledQuery(plan, {
           dialect: dataSource.type,
           tables,
+          relationships,
           preferApprovedSemantics: true,
         });
 
@@ -417,5 +419,146 @@ export class DashboardsService {
 
   async executeWidgetQuery(workspaceId: string, queryId: string) {
     return this.queries.execute(workspaceId, queryId);
+  }
+
+  /**
+   * NL edit: generate a fresh proposal for the prompt and append new widgets
+   * as a new dashboard version (keeps existing widgets).
+   */
+  async edit(input: {
+    workspaceId: string;
+    dashboardId: string;
+    prompt: string;
+    useAi?: boolean;
+    provider?: AiProviderName;
+  }) {
+    const dashboard = await this.prisma.dashboard.findFirst({
+      where: { id: input.dashboardId, workspaceId: input.workspaceId },
+    });
+    if (!dashboard) throw new NotFoundError('Dashboard not found');
+
+    const current = await this.prisma.dashboardVersion.findFirst({
+      where: { dashboardId: dashboard.id, version: dashboard.currentVersion },
+    });
+    if (!current) throw new NotFoundError('Dashboard version not found');
+
+    const currentSpec = dashboardSpecSchema.parse(current.spec);
+    const query = await this.prisma.queryDefinition.findFirst({
+      where: { dashboardId: dashboard.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!query) {
+      throw new AppError(
+        'Dashboard has no queries to base an edit on',
+        'DASHBOARD_EDIT_FAILED',
+        400,
+      );
+    }
+
+    const { proposal, source } = await this.resolveProposal(input.workspaceId, {
+      dataSourceId: query.dataSourceId,
+      semanticModelId: query.semanticModelId ?? undefined,
+      prompt: input.prompt,
+      useAi: input.useAi,
+      provider: input.provider,
+    });
+
+    const newWidgets: DashboardSpec['widgets'] = [];
+    const yOffset =
+      currentSpec.widgets.reduce(
+        (max, w) => Math.max(max, w.position.y + w.position.height),
+        0,
+      ) || 0;
+
+    for (const [index, widget] of proposal.widgets.entries()) {
+      try {
+        const plan = queryPlanSchema.parse({
+          dataSourceId: query.dataSourceId,
+          metrics: [
+            {
+              expression: widget.metricExpression,
+              aggregation: widget.aggregation,
+              alias: 'value',
+            },
+          ],
+          dimensions: widget.dimensionField
+            ? [{ field: widget.dimensionField, alias: 'dimension' }]
+            : [],
+          filters: [],
+          sort: [{ field: 'value', direction: 'DESC' }],
+          limit: widget.type === 'kpi' ? 1 : 100,
+        });
+        const created = await this.queries.create({
+          workspaceId: input.workspaceId,
+          name: widget.queryName || `${dashboard.name} · ${widget.title}`,
+          semanticModelId: query.semanticModelId ?? undefined,
+          plan,
+        });
+        newWidgets.push({
+          id: createId(),
+          type: widget.type,
+          title: widget.title,
+          queryId: created.id,
+          position: {
+            x: widget.position?.x ?? (index % 2) * 6,
+            y: yOffset + (widget.position?.y ?? Math.floor(index / 2) * 4),
+            width: widget.position?.width ?? 6,
+            height: widget.position?.height ?? 4,
+          },
+          config: widget.config ?? {},
+        });
+      } catch {
+        // Skip invalid widgets
+      }
+    }
+
+    if (!newWidgets.length) {
+      throw new AppError(
+        'Could not add any valid widgets from the edit prompt',
+        'DASHBOARD_EDIT_FAILED',
+        400,
+      );
+    }
+
+    const nextVersion = dashboard.currentVersion + 1;
+    const spec = dashboardSpecSchema.parse({
+      ...currentSpec,
+      widgets: [...currentSpec.widgets, ...newWidgets],
+    });
+
+    await this.prisma.conversation.create({
+      data: {
+        workspaceId: input.workspaceId,
+        dataSourceId: query.dataSourceId,
+        title: `Edit: ${input.prompt.slice(0, 60)}`,
+        messages: {
+          create: [
+            { role: 'user', content: input.prompt },
+            {
+              role: 'assistant',
+              content: `Added ${newWidgets.length} widget(s) via ${source}`,
+            },
+          ],
+        },
+      },
+    });
+
+    await this.prisma.dashboardVersion.create({
+      data: {
+        dashboardId: dashboard.id,
+        version: nextVersion,
+        spec: spec as unknown as Prisma.InputJsonValue,
+      },
+    });
+    const updated = await this.prisma.dashboard.update({
+      where: { id: dashboard.id },
+      data: { currentVersion: nextVersion },
+    });
+
+    return {
+      dashboard: this.toDto(updated),
+      spec,
+      proposalMeta: { source, addedWidgets: newWidgets.length },
+    };
   }
 }

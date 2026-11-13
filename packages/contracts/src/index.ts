@@ -5,4 +5,6 @@ export * from './data-source.js';
 export * from './semantic.js';
 export * from './query.js';
 export * from './dashboard.js';
+export * from './agent.js';
+export * from './invite.js';
 export * from './common.js';

@@ -13,6 +13,12 @@ export const updateSemanticStatusSchema = z.object({
   status: z.enum(semanticStatuses),
 });
 
+export const bulkSemanticStatusSchema = z.object({
+  kind: z.enum(['entities', 'metrics', 'dimensions', 'relationships']),
+  fromStatus: z.enum(semanticStatuses),
+  toStatus: z.enum(semanticStatuses),
+});
+
 export const updateSemanticItemSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   description: z.string().max(500).nullable().optional(),
@@ -57,3 +63,4 @@ export const proposeSemanticModelSchema = z
 
 export type CreateSemanticModelInput = z.infer<typeof createSemanticModelSchema>;
 export type UpdateSemanticStatusInput = z.infer<typeof updateSemanticStatusSchema>;
+export type BulkSemanticStatusInput = z.infer<typeof bulkSemanticStatusSchema>;

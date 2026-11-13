@@ -15,6 +15,7 @@ export interface Workspace {
   id: string;
   name: string;
   ownerId: string;
+  timezone: string;
   role: string;
   createdAt: string;
 }

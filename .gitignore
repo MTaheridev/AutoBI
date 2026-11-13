@@ -14,3 +14,9 @@ docker-data
 infrastructure/docker/data
 .prisma
 packages/database/prisma/generated
+
+# Cursor / AI agent tooling (local only)
+.cursor/
+AGENTS.md
+**/.agents/
+.agent/

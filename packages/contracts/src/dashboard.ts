@@ -59,6 +59,15 @@ export const generateDashboardSchema = z.object({
   provider: z.enum(['openai', 'openrouter']).optional(),
 });
 
+export const editDashboardSchema = z.object({
+  workspaceId: z.string().uuid(),
+  dashboardId: z.string().uuid(),
+  prompt: z.string().min(1).max(2000),
+  useAi: z.boolean().optional().default(true),
+  provider: z.enum(['openai', 'openrouter']).optional(),
+});
+
 export type CreateDashboardInput = z.infer<typeof createDashboardSchema>;
 export type GenerateDashboardInput = z.infer<typeof generateDashboardSchema>;
+export type EditDashboardInput = z.infer<typeof editDashboardSchema>;
 export type DashboardSpecInput = z.infer<typeof dashboardSpecSchema>;

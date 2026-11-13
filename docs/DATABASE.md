@@ -2,10 +2,12 @@
 
 AutoBI stores application state in PostgreSQL via Prisma (`packages/database`).
 
+Local host setups often use `postgresql://postgres:<password>@localhost:5432/autobi_db?schema=public`. Compose uses `autobi`/`autobi` on database `autobi`.
+
 ## Sprint 1 models
 
 - `User`
-- `Workspace`
+- `Workspace` (includes `timezone` IANA string, default `UTC`, for dashboard datetime display)
 - `Membership` (`Owner`, `Admin`, `Member`, `Viewer`)
 - `AIProviderConfig`
 - `DataSource`
@@ -46,6 +48,11 @@ Versions increment per data source. The API returns the latest version.
 - `Dashboard` / `DashboardVersion` (immutable versioned JSON specs)
 - `Conversation` / `Message` (generation transcript)
 - `QueryDefinition.dashboardId` optional link
+
+## Phase 3 models
+
+- `User.emailVerifiedAt`
+- `WorkspaceInvite` (email, role, token, expiry, acceptedAt)
 
 ## Future models
 

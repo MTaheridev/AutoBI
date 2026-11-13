@@ -1,13 +1,25 @@
 import { z } from 'zod';
 
-export const aiProviderNames = ['openai', 'openrouter'] as const;
+export const aiProviderNames = ['openai', 'openrouter', 'gemini'] as const;
 
-export const saveAiProviderConfigSchema = z.object({
-  workspaceId: z.string().uuid(),
-  provider: z.enum(aiProviderNames),
-  apiKey: z.string().min(1),
-  model: z.string().min(1),
-});
+export const saveAiProviderConfigSchema = z
+  .object({
+    workspaceId: z.string().uuid(),
+    provider: z.enum(aiProviderNames),
+    /** Required on create; optional on update when keeping the existing key. */
+    apiKey: z.string().min(1).optional(),
+    model: z.string().min(1),
+    configId: z.string().uuid().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (!val.apiKey && !val.configId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'apiKey is required when creating a provider config',
+        path: ['apiKey'],
+      });
+    }
+  });
 
 export const testAiProviderSchema = z.object({
   workspaceId: z.string().uuid(),

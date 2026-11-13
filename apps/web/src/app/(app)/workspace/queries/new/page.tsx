@@ -173,7 +173,7 @@ export default function NewQueryPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-semibold">New query</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">New query</h1>
         <p className="mt-1 text-sm text-ink-muted">
           Plans are validated against schema allow-lists before SQL compilation.
         </p>

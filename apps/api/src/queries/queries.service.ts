@@ -10,16 +10,27 @@ import {
   queryPlanSchema,
   type QueryPlan,
 } from '@autobi/query-engine';
-import { AppError, NotFoundError } from '@autobi/shared';
+import { allowPrivateDbHosts } from '@autobi/config';
+import {
+  AppError,
+  assertSafeDbHost,
+  NotFoundError,
+  sanitizeClientError,
+  summarizeInternalError,
+} from '@autobi/shared';
 import type { Prisma } from '@autobi/database';
 import { PrismaService } from '../core/prisma.service.js';
 import { EncryptionService } from '../core/encryption.service.js';
+import { QueryConcurrencyService } from '../core/query-concurrency.service.js';
+import { ConnectorPoolService } from '../core/connector-pool.service.js';
 
 @Injectable()
 export class QueriesService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly concurrency: QueryConcurrencyService,
+    private readonly pools: ConnectorPoolService,
   ) {}
 
   onModuleInit() {
@@ -76,6 +87,14 @@ export class QueriesService implements OnModuleInit {
         name: string;
         columns: Array<{ name: string; dataType?: string }>;
       }>;
+      relationships?: Array<{
+        sourceSchema: string;
+        sourceTable: string;
+        sourceColumn: string;
+        targetSchema: string;
+        targetTable: string;
+        targetColumn: string;
+      }>;
     };
 
     let metrics: Array<{
@@ -91,11 +110,12 @@ export class QueriesService implements OnModuleInit {
       field: string;
       status: string;
     }> = [];
+    const relationships = [...(metadata.relationships ?? [])];
 
     if (semanticModelId) {
       const model = await this.prisma.semanticModel.findFirst({
         where: { id: semanticModelId, workspaceId, dataSourceId: ds.id },
-        include: { metrics: true, dimensions: true },
+        include: { metrics: true, dimensions: true, relationships: true, entities: true },
       });
       if (!model) throw new NotFoundError('Semantic model not found');
       metrics = model.metrics.map((m) => ({
@@ -111,6 +131,33 @@ export class QueriesService implements OnModuleInit {
         field: d.field,
         status: d.status,
       }));
+      const entityByName = new Map(
+        model.entities.map((e) => [e.name.toLowerCase(), e] as const),
+      );
+      for (const rel of model.relationships) {
+        if (rel.status !== 'Approved') continue;
+        const from = entityByName.get(rel.fromEntity.toLowerCase());
+        const to = entityByName.get(rel.toEntity.toLowerCase());
+        if (!from || !to) continue;
+        const fromRef = parseTableRef(from.tableRef);
+        const toRef = parseTableRef(to.tableRef);
+        if (!fromRef || !toRef) continue;
+        // Semantic fields may be schema.table.column — join graph needs bare column names.
+        const sourceColumn = rel.fromField.includes('.')
+          ? rel.fromField.split('.').pop()!
+          : rel.fromField;
+        const targetColumn = rel.toField.includes('.')
+          ? rel.toField.split('.').pop()!
+          : rel.toField;
+        relationships.push({
+          sourceSchema: fromRef.schema,
+          sourceTable: fromRef.table,
+          sourceColumn,
+          targetSchema: toRef.schema,
+          targetTable: toRef.table,
+          targetColumn,
+        });
+      }
     }
 
     return {
@@ -118,6 +165,7 @@ export class QueriesService implements OnModuleInit {
       compileContext: {
         dialect: ds.type as ConnectorType,
         tables: metadata.tables ?? [],
+        relationships,
         metrics,
         dimensions,
         preferApprovedSemantics: true,
@@ -129,6 +177,7 @@ export class QueriesService implements OnModuleInit {
     workspaceId: string;
     name: string;
     semanticModelId?: string;
+    dashboardId?: string;
     plan: QueryPlan;
   }) {
     const plan = queryPlanSchema.parse(input.plan);
@@ -144,6 +193,7 @@ export class QueriesService implements OnModuleInit {
         workspaceId: input.workspaceId,
         dataSourceId: dataSource.id,
         semanticModelId: input.semanticModelId,
+        dashboardId: input.dashboardId,
         name: input.name,
         plan: plan as unknown as Prisma.InputJsonValue,
         compiledSql: compiled.sql,
@@ -257,6 +307,12 @@ export class QueriesService implements OnModuleInit {
   }
 
   async execute(workspaceId: string, id: string) {
+    return this.concurrency.runExclusive(workspaceId, () =>
+      this.executeInner(workspaceId, id),
+    );
+  }
+
+  private async executeInner(workspaceId: string, id: string) {
     const existing = await this.prisma.queryDefinition.findFirst({
       where: { id, workspaceId },
     });
@@ -279,17 +335,33 @@ export class QueriesService implements OnModuleInit {
     });
 
     const started = Date.now();
-    const connector = connectorRegistry.create(dataSource.type);
     const config = JSON.parse(
       this.encryption.decrypt(dataSource.encryptedConfig),
     ) as ConnectionConfig;
+    await assertSafeDbHost(config.host, { allowPrivate: allowPrivateDbHosts() });
 
     try {
-      await connector.connect(config);
-      const result = await connector.executeQuery(
-        { sql: compiled.sql, params: compiled.params },
-        { maxRows: plan.limit, timeoutMs: 30_000 },
-      );
+      const execOpts = { maxRows: plan.limit, timeoutMs: 30_000 };
+      const result = this.pools.supportsPooling(dataSource.type)
+        ? await this.pools.execute(
+            dataSource.id,
+            dataSource.type,
+            config,
+            { sql: compiled.sql, params: compiled.params },
+            execOpts,
+          )
+        : await (async () => {
+            const connector = connectorRegistry.create(dataSource.type);
+            try {
+              await connector.connect(config);
+              return connector.executeQuery(
+                { sql: compiled.sql, params: compiled.params },
+                execOpts,
+              );
+            } finally {
+              await connector.close();
+            }
+          })();
 
       const preview = {
         columns: result.columns,
@@ -327,18 +399,35 @@ export class QueriesService implements OnModuleInit {
         result: preview,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Query execution failed';
+      const internal = summarizeInternalError(error);
       await this.prisma.queryRun.update({
         where: { id: run.id },
         data: {
           status: 'failed',
           durationMs: Date.now() - started,
-          error: message,
+          error: internal,
         },
       });
-      throw new AppError(message, 'QUERY_EXECUTION_FAILED', 502);
-    } finally {
-      await connector.close();
+      throw new AppError(
+        sanitizeClientError(error, 'Query execution failed'),
+        'QUERY_EXECUTION_FAILED',
+        502,
+      );
     }
   }
 }
+
+/** Parse `schema.table` or bare `table` refs from semantic entities. */
+function parseTableRef(ref: string): { schema: string; table: string } | null {
+  const trimmed = ref.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split('.');
+  if (parts.length === 1) return { schema: 'public', table: parts[0]! };
+  if (parts.length >= 2) {
+    const table = parts[parts.length - 1]!;
+    const schema = parts.slice(0, -1).join('.');
+    return { schema, table };
+  }
+  return null;
+}
+

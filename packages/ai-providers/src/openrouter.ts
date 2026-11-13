@@ -1,5 +1,7 @@
 import {
   AIProviderError,
+  type AgentChatRequest,
+  type AgentChatResponse,
   type AIProvider,
   type AIProviderFactory,
   type StructuredAIRequest,
@@ -7,7 +9,7 @@ import {
   type TextAIRequest,
   type TextAIResponse,
 } from '@autobi/ai';
-import { chatCompletion } from './http.js';
+import { chatCompletion, openAiChatWithTools } from './http.js';
 
 class OpenRouterProvider implements AIProvider {
   readonly name = 'openrouter';
@@ -76,6 +78,17 @@ class OpenRouterProvider implements AIProvider {
       provider: this.name,
       model: request.model,
     };
+  }
+
+  async chatWithTools(request: AgentChatRequest): Promise<AgentChatResponse> {
+    return openAiChatWithTools(
+      {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        apiKey: this.apiKey,
+        provider: this.name,
+      },
+      request,
+    );
   }
 
   async testConnection(model: string): Promise<{ ok: boolean; message: string }> {

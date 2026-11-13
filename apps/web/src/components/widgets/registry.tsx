@@ -16,6 +16,8 @@ export interface WidgetProps {
   result: WidgetResult | null;
   loading?: boolean;
   error?: string | null;
+  /** IANA timezone for datetime display (workspace setting). */
+  timeZone?: string;
 }
 
 const KpiWidget = dynamic(() => import('./kpi-widget').then((m) => m.KpiWidget), { ssr: false });

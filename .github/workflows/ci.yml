@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint · typecheck · test · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @autobi/database generate
+
+      - name: Build packages
+        run: pnpm -r --filter './packages/*' build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build apps
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3101
+
+      - name: Install Playwright browser
+        run: pnpm --filter @autobi/web exec playwright install --with-deps chromium
+
+      - name: Start web for e2e
+        run: pnpm --filter @autobi/web start &
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3101
+          PORT: 3100
+
+      - name: Wait for web
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3100/ >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "Web did not become ready" >&2
+          exit 1
+
+      - name: Playwright smoke
+        run: pnpm --filter @autobi/web test:e2e
+        env:
+          CI: true
+          PLAYWRIGHT_BASE_URL: http://localhost:3100

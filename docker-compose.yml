@@ -1,63 +1,172 @@
+# AutoBI — single compose file
+# Default: production images. Web http://localhost:3100 · API http://localhost:3101
+# Dev bind-mount: docker compose stop api worker web && docker compose --profile dev up
+# Integration DBs: docker compose --profile integration up -d
+# Publish data ports: docker compose --profile publish-data up -d
+
+x-app-build: &app-build
+  context: .
+  dockerfile: infrastructure/docker/Dockerfile
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: autobi
-      POSTGRES_PASSWORD: autobi
-      POSTGRES_DB: autobi
-    ports:
-      - '5432:5432'
+      POSTGRES_USER: ${POSTGRES_USER:-autobi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autobi}
+      POSTGRES_DB: ${POSTGRES_DB:-autobi}
     volumes:
       - autobi_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U autobi -d autobi']
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    ports:
-      - '6379:6379'
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--requirepass',
+        '${REDIS_PASSWORD:-autobi}',
+      ]
     volumes:
       - autobi_redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG',
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-autobi}
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.22
+    ports:
+      - '${MAILPIT_UI_PORT:-8025}:8025'
+      - '${MAILPIT_SMTP_PORT:-1025}:1025'
+    restart: unless-stopped
 
   api:
     build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.api
+      <<: *app-build
+      target: api
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://autobi:autobi@postgres:5432/autobi?schema=public
-      REDIS_URL: redis://redis:6379
-      API_CORS_ORIGIN: http://localhost:3000
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://autobi:${POSTGRES_PASSWORD:-autobi}@postgres:5432/autobi?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-autobi}@redis:6379}
+      API_CORS_ORIGIN: ${API_CORS_ORIGIN:-http://localhost:3100}
+      DB_HOST_ALLOW_PRIVATE: ${DB_HOST_ALLOW_PRIVATE:-false}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SMTP_URL: ${SMTP_URL:-smtp://mailpit:1025}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      API_PORT: '3001'
     ports:
-      - '3001:3001'
+      - '${API_HOST_PORT:-3101}:3001'
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: sh -c "pnpm --filter @autobi/database migrate:deploy && pnpm --filter @autobi/api dev"
+      mailpit:
+        condition: service_started
+    command:
+      [
+        'sh',
+        '-c',
+        'pnpm --filter @autobi/database migrate:deploy && pnpm --filter @autobi/api start',
+      ]
+    restart: unless-stopped
+
+  worker:
+    build:
+      <<: *app-build
+      target: worker
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://autobi:${POSTGRES_PASSWORD:-autobi}@postgres:5432/autobi?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-autobi}@redis:6379}
+      DB_HOST_ALLOW_PRIVATE: ${DB_HOST_ALLOW_PRIVATE:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      <<: *app-build
+      target: web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3101}
+    environment:
+      NODE_ENV: production
+    ports:
+      - '${WEB_HOST_PORT:-3100}:3000'
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # --- Dev bind-mount apps (stop prod api/worker/web first) ---
+  api-dev:
+    profiles: ['dev']
+    build:
+      <<: *app-build
+      target: api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://autobi:${POSTGRES_PASSWORD:-autobi}@postgres:5432/autobi?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-autobi}@redis:6379
+      API_CORS_ORIGIN: ${API_CORS_ORIGIN:-http://localhost:3100}
+      SMTP_URL: ${SMTP_URL:-smtp://mailpit:1025}
+      API_PORT: '3001'
+      NODE_ENV: development
+    ports:
+      - '${API_HOST_PORT:-3101}:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    command:
+      [
+        'sh',
+        '-c',
+        'pnpm --filter @autobi/database migrate:deploy && pnpm --filter @autobi/api dev',
+      ]
     volumes:
       - .:/app
       - /app/node_modules
 
-  worker:
+  worker-dev:
+    profiles: ['dev']
     build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.worker
+      <<: *app-build
+      target: worker
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://autobi:autobi@postgres:5432/autobi?schema=public
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://autobi:${POSTGRES_PASSWORD:-autobi}@postgres:5432/autobi?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-autobi}@redis:6379
+      NODE_ENV: development
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,22 +177,48 @@ services:
       - .:/app
       - /app/node_modules
 
-  web:
+  web-dev:
+    profiles: ['dev']
     build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.web
+      <<: *app-build
+      target: web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3101}
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3101}
+      NODE_ENV: development
     ports:
-      - '3000:3000'
+      - '${WEB_HOST_PORT:-3100}:3000'
     depends_on:
-      - api
+      - api-dev
     command: sh -c "pnpm --filter @autobi/web dev"
     volumes:
       - .:/app
       - /app/node_modules
 
-  # Optional integration-test databases
+  # Publish Postgres/Redis on non-famous host ports (loopback)
+  postgres-host:
+    profiles: ['publish-data']
+    image: alpine/socat:1.8.0.0
+    command: 'TCP-LISTEN:5432,fork TCP:postgres:5432'
+    ports:
+      - '127.0.0.1:5434:5432'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-host:
+    profiles: ['publish-data']
+    image: alpine/socat:1.8.0.0
+    command: 'TCP-LISTEN:6379,fork TCP:redis:6379'
+    ports:
+      - '127.0.0.1:6380:6379'
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   mysql_test:
     profiles: ['integration']
     image: mysql:8.4

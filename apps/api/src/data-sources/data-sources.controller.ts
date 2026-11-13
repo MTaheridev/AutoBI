@@ -12,13 +12,15 @@ import {
 } from '@nestjs/common';
 import {
   createDataSourceSchema,
+  testDataSourceSchema,
   updateDataSourceSchema,
 } from '@autobi/contracts';
-import { ForbiddenError, NotFoundError } from '@autobi/shared';
+import { ForbiddenError } from '@autobi/shared';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PrismaService } from '../core/prisma.service.js';
 import { DataSourcesService } from './data-sources.service.js';
+import { assertWorkspaceRole } from '../common/membership.js';
 
 @Controller('data-sources')
 @UseGuards(AuthGuard)
@@ -28,19 +30,14 @@ export class DataSourcesController {
     private readonly prisma: PrismaService,
   ) {}
 
-  private async assertMembership(
-    userId: string,
-    workspaceId: string,
-    write = false,
-  ) {
-    const membership = await this.prisma.membership.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
-    if (!membership) throw new NotFoundError('Workspace not found');
-    if (write && membership.role === 'Viewer') {
-      throw new ForbiddenError('Viewers cannot modify data sources');
-    }
-    return membership;
+  private assertMembership(userId: string, workspaceId: string, write = false) {
+    // Credentialed DS changes require Admin+; reads allow Viewer.
+    return assertWorkspaceRole(
+      this.prisma,
+      userId,
+      workspaceId,
+      write ? 'Admin' : 'Viewer',
+    );
   }
 
   @Get()
@@ -55,8 +52,14 @@ export class DataSourcesController {
   }
 
   @Get('jobs/:jobId')
-  async jobStatus(@Param('jobId') jobId: string) {
-    return this.dataSources.getJobStatus(jobId);
+  async jobStatus(
+    @Req() req: AuthenticatedRequest,
+    @Param('jobId') jobId: string,
+    @Query('workspaceId') workspaceId: string,
+  ) {
+    if (!workspaceId) throw new ForbiddenError('workspaceId required');
+    await this.assertMembership(req.userId, workspaceId);
+    return this.dataSources.getJobStatus(workspaceId, jobId);
   }
 
   @Post()
@@ -80,7 +83,7 @@ export class DataSourcesController {
     },
   ) {
     await this.assertMembership(req.userId, body.workspaceId, true);
-    const dataSource = await this.dataSources.create(body);
+    const dataSource = await this.dataSources.create({ ...body, actorId: req.userId });
     return { dataSource };
   }
 
@@ -118,7 +121,7 @@ export class DataSourcesController {
   ) {
     if (!workspaceId) throw new ForbiddenError('workspaceId required');
     await this.assertMembership(req.userId, workspaceId, true);
-    const dataSource = await this.dataSources.update(workspaceId, id, body);
+    const dataSource = await this.dataSources.update(workspaceId, id, body, req.userId);
     return { dataSource };
   }
 
@@ -130,7 +133,33 @@ export class DataSourcesController {
   ) {
     if (!workspaceId) throw new ForbiddenError('workspaceId required');
     await this.assertMembership(req.userId, workspaceId, true);
-    return this.dataSources.delete(workspaceId, id);
+    return this.dataSources.delete(workspaceId, id, req.userId);
+  }
+
+  /** Ephemeral test with unsaved credentials — must be declared before `:id/test`. */
+  @Post('test')
+  async testConfig(
+    @Req() req: AuthenticatedRequest,
+    @Body(new ZodValidationPipe(testDataSourceSchema))
+    body: {
+      workspaceId: string;
+      type: 'postgresql' | 'mysql' | 'mariadb' | 'sqlserver';
+      dataSourceId?: string;
+      config: {
+        host: string;
+        port: number;
+        database: string;
+        username: string;
+        password?: string;
+        ssl?: boolean;
+        schema?: string;
+        connectionTimeoutMs?: number;
+      };
+    },
+  ) {
+    await this.assertMembership(req.userId, body.workspaceId, true);
+    const result = await this.dataSources.testConfigInput(body);
+    return { result };
   }
 
   @Post(':id/test')

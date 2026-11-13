@@ -14,6 +14,7 @@ import {
   createDimensionSchema,
   createEntitySchema,
   createMetricSchema,
+  bulkSemanticStatusSchema,
   createRelationshipSchema,
   createSemanticModelSchema,
   proposeSemanticModelSchema,
@@ -24,6 +25,8 @@ import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PrismaService } from '../core/prisma.service.js';
 import { SemanticService } from './semantic.service.js';
+import { assertWorkspaceRole } from '../common/membership.js';
+import { WorkspaceThrottleService } from '../core/workspace-throttle.service.js';
 
 @Controller('semantic-models')
 @UseGuards(AuthGuard)
@@ -31,17 +34,17 @@ export class SemanticController {
   constructor(
     private readonly semantic: SemanticService,
     private readonly prisma: PrismaService,
+    private readonly throttle: WorkspaceThrottleService,
   ) {}
 
-  private async assertMembership(userId: string, workspaceId: string, write = false) {
-    const membership = await this.prisma.membership.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
-    if (!membership) throw new NotFoundError('Workspace not found');
-    if (write && membership.role === 'Viewer') {
-      throw new ForbiddenError('Viewers cannot modify semantic models');
-    }
-    return membership;
+  private assertMembership(userId: string, workspaceId: string, write = false) {
+    // Approve/reject and propose require Member+
+    return assertWorkspaceRole(
+      this.prisma,
+      userId,
+      workspaceId,
+      write ? 'Member' : 'Viewer',
+    );
   }
 
   private async workspaceOfModel(id: string) {
@@ -100,6 +103,7 @@ export class SemanticController {
   ) {
     const workspaceId = await this.workspaceOfModel(id);
     await this.assertMembership(req.userId, workspaceId, true);
+    await this.throttle.assert(workspaceId, 'semanticPropose', req.userId);
     return this.semantic.propose(workspaceId, id, body ?? { useAi: true });
   }
 
@@ -176,7 +180,13 @@ export class SemanticController {
   ) {
     const workspaceId = await this.workspaceOfModel(id);
     await this.assertMembership(req.userId, workspaceId, true);
-    const entity = await this.semantic.updateEntityStatus(workspaceId, id, itemId, body.status);
+    const entity = await this.semantic.updateEntityStatus(
+      workspaceId,
+      id,
+      itemId,
+      body.status,
+      req.userId,
+    );
     return { entity };
   }
 
@@ -189,7 +199,13 @@ export class SemanticController {
   ) {
     const workspaceId = await this.workspaceOfModel(id);
     await this.assertMembership(req.userId, workspaceId, true);
-    const metric = await this.semantic.updateMetricStatus(workspaceId, id, itemId, body.status);
+    const metric = await this.semantic.updateMetricStatus(
+      workspaceId,
+      id,
+      itemId,
+      body.status,
+      req.userId,
+    );
     return { metric };
   }
 
@@ -207,6 +223,7 @@ export class SemanticController {
       id,
       itemId,
       body.status,
+      req.userId,
     );
     return { dimension };
   }
@@ -225,6 +242,7 @@ export class SemanticController {
       id,
       itemId,
       body.status,
+      req.userId,
     );
     return { relationship };
   }
@@ -233,7 +251,7 @@ export class SemanticController {
   async bulkStatus(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
-    @Body()
+    @Body(new ZodValidationPipe(bulkSemanticStatusSchema))
     body: {
       kind: 'entities' | 'metrics' | 'dimensions' | 'relationships';
       fromStatus: 'Proposed' | 'Approved' | 'Rejected';

@@ -1,11 +1,15 @@
-import { loadEnv } from '@autobi/config';
+import { allowPrivateDbHosts, loadEnv } from '@autobi/config';
 import {
   connectorRegistry,
   registerBuiltinConnectors,
   type ConnectionConfig,
 } from '@autobi/connectors';
 import { prisma, type Prisma } from '@autobi/database';
-import { decryptSecret } from '@autobi/shared';
+import {
+  assertSafeDbHost,
+  decryptSecret,
+  summarizeInternalError,
+} from '@autobi/shared';
 
 registerBuiltinConnectors();
 
@@ -23,6 +27,7 @@ export async function processIntrospection(data: {
   }
 
   const config = JSON.parse(decryptSecret(ds.encryptedConfig, env.ENCRYPTION_KEY)) as ConnectionConfig;
+  await assertSafeDbHost(config.host, { allowPrivate: allowPrivateDbHosts(env) });
   const connector = connectorRegistry.create(ds.type);
 
   try {
@@ -65,12 +70,11 @@ export async function processIntrospection(data: {
       relationshipCount: result.relationships.length,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Introspection failed';
     await prisma.dataSource.update({
       where: { id: ds.id },
       data: {
         introspectionStatus: 'failed',
-        lastError: message,
+        lastError: summarizeInternalError(error),
       },
     });
     throw error;

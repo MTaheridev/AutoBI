@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
+import { useAppMode } from '@/lib/app-mode';
+import { AgentSurfaceShell } from '@/components/agent/agent-surface-shell';
 import { Button, EmptyState, Field, Input, Select } from '@/components/ui';
 
 interface DataSource {
@@ -20,6 +22,8 @@ interface SemanticModel {
 
 export default function GenerateDashboardPage() {
   const { current } = useWorkspace();
+  const { mode, ready } = useAppMode();
+  const agent = mode === 'agent';
   const router = useRouter();
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [models, setModels] = useState<SemanticModel[]>([]);
@@ -51,11 +55,15 @@ export default function GenerateDashboardPage() {
     setSemanticModelId(filteredModels[0]?.id ?? '');
   }, [filteredModels]);
 
+  if (!ready) {
+    return <p className="text-sm text-ink-muted">Loading…</p>;
+  }
+
   if (!current) {
     return (
       <EmptyState
         title="No workspace selected"
-        description="Create a workspace from the home page first."
+        description="Create a workspace from Agent Mode first."
       />
     );
   }
@@ -84,10 +92,10 @@ export default function GenerateDashboardPage() {
     }
   }
 
-  return (
+  const body = (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-semibold">Generate dashboard</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">Generate dashboard</h1>
         <p className="mt-1 text-sm text-ink-muted">
           AI returns a JSON dashboard spec only. Queries are compiled and validated server-side.
         </p>
@@ -128,4 +136,10 @@ export default function GenerateDashboardPage() {
       </form>
     </div>
   );
+
+  if (agent) {
+    return <AgentSurfaceShell>{body}</AgentSurfaceShell>;
+  }
+
+  return body;
 }

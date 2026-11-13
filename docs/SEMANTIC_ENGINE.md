@@ -42,6 +42,10 @@ POST   /api/v1/semantic-models/:id/bulk-status
 
 Propose requires a schema snapshot on the linked data source. If AI is unavailable or fails, the heuristic proposer is used.
 
+Proposals are validated against the snapshot (`validateProposalAgainstSnapshot`) before persist: table/column refs and aggregations must match catalog metadata.
+
+Proposals are validated against the snapshot (`validateProposalAgainstSnapshot`) before persist: table/column refs and aggregations must match catalog metadata.
+
 ## UI
 
 - `/workspace/semantic-models` — list / create

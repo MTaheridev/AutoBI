@@ -2,10 +2,48 @@
 
 import Link from 'next/link';
 import { FormEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Bot } from 'lucide-react';
 import { useWorkspace } from '@/lib/workspace';
-import { Button, EmptyState, Field, Input } from '@/components/ui';
+import { useAppMode } from '@/lib/app-mode';
+import { Button, EmptyState, Input, PageHeader } from '@/components/ui';
+
+const destinations = [
+  {
+    href: '/workspace/data-sources',
+    title: 'Data sources',
+    description: 'Register PostgreSQL, MySQL, MariaDB, or SQL Server connections.',
+  },
+  {
+    href: '/workspace/semantic-models',
+    title: 'Semantics',
+    description: 'Propose and approve entities, metrics, and dimensions.',
+  },
+  {
+    href: '/workspace/queries',
+    title: 'Queries',
+    description: 'Compile validated plans to dialect SQL and execute safely.',
+  },
+  {
+    href: '/workspace/dashboards',
+    title: 'Dashboards',
+    description: 'Browse and edit versioned dashboard specs.',
+  },
+  {
+    href: '/workspace/ai-settings',
+    title: 'AI settings',
+    description: 'Manage encrypted provider keys for this workspace.',
+  },
+  {
+    href: '/workspace/settings',
+    title: 'Settings',
+    description: 'Timezone, invites, and account actions.',
+  },
+];
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { setMode } = useAppMode();
   const { current, workspaces, create, loading } = useWorkspace();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -22,8 +60,13 @@ export default function DashboardPage() {
     }
   }
 
+  function backToAgent() {
+    setMode('agent');
+    router.push('/workspace/agent');
+  }
+
   if (loading) {
-    return <p className="text-sm text-ink-muted">Loading workspace…</p>;
+    return <p className="data-mono text-sm text-ink-muted">Loading workspace…</p>;
   }
 
   if (!workspaces.length) {
@@ -31,7 +74,7 @@ export default function DashboardPage() {
       <div className="mx-auto max-w-xl">
         <EmptyState
           title="Create your first workspace"
-          description="Workspaces isolate data sources, AI settings, and future dashboards."
+          description="Workspaces isolate data sources, AI settings, and dashboards."
           action={
             <form className="mt-2 flex w-full max-w-sm gap-2" onSubmit={onCreate}>
               <Input
@@ -48,61 +91,42 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-semibold">Welcome to {current?.name}</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Connect databases and configure AI providers. Dashboard generation comes in a later sprint.
-        </p>
+    <div>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <PageHeader
+          title="Workshop"
+          description={`Manual tools for ${current?.name ?? 'this workspace'}. Prefer Agent Mode for day-to-day work.`}
+        />
+        <Button variant="secondary" onClick={backToAgent}>
+          <Bot className="h-4 w-4" aria-hidden />
+          Back to Agent
+        </Button>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Link href="/workspace/data-sources" className="panel block p-5 transition hover:border-brand-400">
-          <h2 className="font-medium">Data sources</h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Register PostgreSQL, MySQL, MariaDB, or SQL Server connections.
-          </p>
-        </Link>
-        <Link
-          href="/workspace/semantic-models"
-          className="panel block p-5 transition hover:border-brand-400"
-        >
-          <h2 className="font-medium">Semantics</h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Propose and approve entities, metrics, and dimensions from schemas.
-          </p>
-        </Link>
-        <Link href="/workspace/queries" className="panel block p-5 transition hover:border-brand-400">
-          <h2 className="font-medium">Queries</h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Compile validated plans to dialect SQL and execute safely.
-          </p>
-        </Link>
-        <Link href="/workspace/dashboards" className="panel block p-5 transition hover:border-brand-400">
-          <h2 className="font-medium">Dashboards</h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Generate and edit versioned dashboard specs with a widget registry.
-          </p>
-        </Link>
-        <Link href="/workspace/ai-settings" className="panel block p-5 transition hover:border-brand-400">
-          <h2 className="font-medium">AI settings</h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Store encrypted OpenAI or OpenRouter credentials for your workspace.
-          </p>
-        </Link>
-      </div>
-      <div className="panel p-5">
-        <h2 className="font-medium">Create another workspace</h2>
+
+      <ul className="list-stagger divide-y divide-line border-y border-line">
+        {destinations.map((item) => (
+          <li key={item.href} className="list-stagger__item">
+            <Link
+              href={item.href}
+              className="flex flex-col gap-1 py-4 transition hover:bg-surface-muted/60 sm:flex-row sm:items-baseline sm:justify-between sm:gap-8"
+            >
+              <span className="font-medium text-ink">{item.title}</span>
+              <span className="max-w-xl text-sm text-ink-muted">{item.description}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-10 border-t border-line pt-6">
+        <h2 className="font-display text-lg font-semibold tracking-tight">Create another workspace</h2>
         <form className="mt-3 flex max-w-md gap-2" onSubmit={onCreate}>
-          <Field label="">
-            <Input
-              placeholder="New workspace name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </Field>
-          <div className="flex items-end">
-            <Button disabled={creating}>{creating ? '…' : 'Create'}</Button>
-          </div>
+          <Input
+            placeholder="New workspace name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label="New workspace name"
+          />
+          <Button disabled={creating}>{creating ? '…' : 'Create'}</Button>
         </form>
       </div>
     </div>

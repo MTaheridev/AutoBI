@@ -10,11 +10,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { saveAiProviderConfigSchema, testAiProviderSchema } from '@autobi/contracts';
-import { ForbiddenError, NotFoundError } from '@autobi/shared';
+import { ForbiddenError } from '@autobi/shared';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PrismaService } from '../core/prisma.service.js';
 import { AiProvidersService } from './ai-providers.service.js';
+import { assertWorkspaceRole } from '../common/membership.js';
 
 @Controller('ai/providers')
 @UseGuards(AuthGuard)
@@ -24,15 +25,13 @@ export class AiProvidersController {
     private readonly prisma: PrismaService,
   ) {}
 
-  private async assertMembership(userId: string, workspaceId: string) {
-    const membership = await this.prisma.membership.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
-    if (!membership) throw new NotFoundError('Workspace not found');
-    if (membership.role === 'Viewer') {
-      throw new ForbiddenError('Viewers cannot manage AI providers');
-    }
-    return membership;
+  private assertMembership(userId: string, workspaceId: string, manage = false) {
+    return assertWorkspaceRole(
+      this.prisma,
+      userId,
+      workspaceId,
+      manage ? 'Admin' : 'Member',
+    );
   }
 
   @Get()
@@ -53,13 +52,14 @@ export class AiProvidersController {
     @Body(new ZodValidationPipe(saveAiProviderConfigSchema))
     body: {
       workspaceId: string;
-      provider: 'openai' | 'openrouter';
-      apiKey: string;
+      provider: 'openai' | 'openrouter' | 'gemini';
+      apiKey?: string;
       model: string;
+      configId?: string;
     },
   ) {
-    await this.assertMembership(req.userId, body.workspaceId);
-    const config = await this.aiProviders.saveConfig(body);
+    await this.assertMembership(req.userId, body.workspaceId, true);
+    const config = await this.aiProviders.saveConfig({ ...body, actorId: req.userId });
     return { config };
   }
 
@@ -69,13 +69,13 @@ export class AiProvidersController {
     @Body(new ZodValidationPipe(testAiProviderSchema))
     body: {
       workspaceId: string;
-      provider: 'openai' | 'openrouter';
+      provider: 'openai' | 'openrouter' | 'gemini';
       apiKey?: string;
       model: string;
       configId?: string;
     },
   ) {
-    await this.assertMembership(req.userId, body.workspaceId);
+    await this.assertMembership(req.userId, body.workspaceId, true);
     const result = await this.aiProviders.test(body);
     return { result };
   }
@@ -87,7 +87,7 @@ export class AiProvidersController {
     @Query('workspaceId') workspaceId: string,
   ) {
     if (!workspaceId) throw new ForbiddenError('workspaceId required');
-    await this.assertMembership(req.userId, workspaceId);
-    return this.aiProviders.deleteConfig(workspaceId, id);
+    await this.assertMembership(req.userId, workspaceId, true);
+    return this.aiProviders.deleteConfig(workspaceId, id, req.userId);
   }
 }

@@ -18,6 +18,10 @@ export function registerBuiltinConnectors(): void {
 export * from './types.js';
 export * from './registry.js';
 export * from './normalize.js';
+export * from './ssl.js';
+export * from './timeout.js';
+export * from './pool.js';
+export * from './infer-relationships.js';
 export { postgresqlFactory } from './postgresql.js';
 export { mysqlFactory } from './mysql.js';
 export { mariadbFactory } from './mariadb.js';

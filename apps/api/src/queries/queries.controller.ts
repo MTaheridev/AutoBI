@@ -16,6 +16,8 @@ import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PrismaService } from '../core/prisma.service.js';
 import { QueriesService } from './queries.service.js';
+import { assertWorkspaceRole } from '../common/membership.js';
+import { WorkspaceThrottleService } from '../core/workspace-throttle.service.js';
 
 @Controller('queries')
 @UseGuards(AuthGuard)
@@ -23,17 +25,17 @@ export class QueriesController {
   constructor(
     private readonly queries: QueriesService,
     private readonly prisma: PrismaService,
+    private readonly throttle: WorkspaceThrottleService,
   ) {}
 
-  private async assertMembership(userId: string, workspaceId: string, write = false) {
-    const membership = await this.prisma.membership.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
-    if (!membership) throw new NotFoundError('Workspace not found');
-    if (write && membership.role === 'Viewer') {
-      throw new ForbiddenError('Viewers cannot modify queries');
-    }
-    return membership;
+  private assertMembership(userId: string, workspaceId: string, write = false) {
+    // Viewers may list/get/execute; Members+ may create/update/delete.
+    return assertWorkspaceRole(
+      this.prisma,
+      userId,
+      workspaceId,
+      write ? 'Member' : 'Viewer',
+    );
   }
 
   private async workspaceOf(id: string) {
@@ -110,7 +112,9 @@ export class QueriesController {
   @Post(':id/execute')
   async execute(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     const workspaceId = await this.workspaceOf(id);
-    await this.assertMembership(req.userId, workspaceId, true);
+    // Viewers can run analytical queries
+    await this.assertMembership(req.userId, workspaceId, false);
+    await this.throttle.assert(workspaceId, 'queryExecute', req.userId);
     return this.queries.execute(workspaceId, id);
   }
 }

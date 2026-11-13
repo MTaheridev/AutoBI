@@ -1,11 +1,12 @@
 'use client';
 
+import { formatCellValue } from '@/lib/format-display';
 import type { WidgetProps } from './registry';
 
-export function TableWidget({ title, result, loading, error }: WidgetProps) {
+export function TableWidget({ title, result, loading, error, timeZone }: WidgetProps) {
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-line px-4 py-2 text-sm font-medium">{title}</div>
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
+      <div className="truncate border-b border-line px-4 py-2 text-sm font-medium">{title}</div>
       <div className="min-h-0 flex-1 overflow-auto">
         {loading && <div className="p-4 text-sm text-ink-muted">Loading…</div>}
         {error && <div className="p-4 text-sm text-red-600">{error}</div>}
@@ -24,8 +25,8 @@ export function TableWidget({ title, result, loading, error }: WidgetProps) {
               {result.rows.map((row, i) => (
                 <tr key={i} className="border-t border-line">
                   {result.columns.map((c) => (
-                    <td key={c} className="px-3 py-1.5">
-                      {String(row[c] ?? '')}
+                    <td key={c} className="whitespace-nowrap px-3 py-1.5">
+                      {formatCellValue(row[c], { timeZone })}
                     </td>
                   ))}
                 </tr>

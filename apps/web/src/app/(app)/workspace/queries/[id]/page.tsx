@@ -98,7 +98,7 @@ export default function QueryDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-semibold">{query.name}</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">{query.name}</h1>
           <div className="mt-2 flex gap-2">
             <Badge>{query.dialect ?? 'uncompiled'}</Badge>
           </div>
@@ -118,14 +118,14 @@ export default function QueryDetailPage() {
 
       <div className="panel p-5">
         <h2 className="font-medium">Compiled SQL</h2>
-        <pre className="mt-3 overflow-auto rounded-xl bg-surface-muted p-4 text-xs">
+        <pre className="mt-3 overflow-auto rounded-control bg-surface-muted p-4 text-xs">
           {query.compiledSql ?? 'Not compiled yet'}
         </pre>
       </div>
 
       <div className="panel p-5">
         <h2 className="font-medium">Plan</h2>
-        <pre className="mt-3 overflow-auto rounded-xl bg-surface-muted p-4 text-xs">
+        <pre className="mt-3 overflow-auto rounded-control bg-surface-muted p-4 text-xs">
           {JSON.stringify(query.plan, null, 2)}
         </pre>
       </div>

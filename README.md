@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/status-MVP%20complete-14b8a6?style=for-the-badge"/>
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-14b8a6?style=for-the-badge"/>
   <img alt="License" src="https://img.shields.io/badge/license-private-64748b?style=for-the-badge"/>
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-22c55e?style=for-the-badge&logo=nodedotjs&logoColor=white"/>
   <img alt="pnpm" src="https://img.shields.io/badge/pnpm-9-f59e0b?style=for-the-badge&logo=pnpm&logoColor=white"/>
@@ -28,15 +28,20 @@
   <a href="#-how-it-works">How it works</a> ·
   <a href="#-architecture">Architecture</a> ·
   <a href="#-tech-stack">Tech stack</a> ·
-  <a href="#-documentation">Docs</a>
+  <a href="#-documentation">Docs</a> ·
+  <a href="https://github.com/MTaheridev/AutoBI">GitHub</a>
+</p>
+
+<p align="center">
+  <sub>Created by <a href="https://github.com/MTaheridev">Mohammad Taheri (@MTaheridev)</a></sub>
 </p>
 
 ---
 
 ## Why AutoBI?
 
-Most BI tools force you to model everything by hand or trust opaque AI SQL.  
-AutoBI keeps humans in control: **AI proposes**, your team **approves**, and every query is **validated before it touches production data**.
+Born out of real engineering frustration: waiting two sprints in a BI ticket queue for a 10-line `GROUP BY`, arguing over hoarded metric formulas, and watching budget burn on gatekeeping.  
+AutoBI replaces politics with deterministic software: **AI proposes**, your team **approves**, and every query is **validated before it touches production data**.
 
 | | |
 | --- | --- |
@@ -48,20 +53,14 @@ AutoBI keeps humans in control: **AI proposes**, your team **approves**, and eve
 
 ---
 
-## Feature highlights
+## What’s included
 
-```text
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│  Connect DB  │ → │   Semantics  │ → │    Queries   │ → │  Dashboards  │
-│  introspect  │   │ propose/OK   │   │ plan → SQL   │   │ NL + ECharts │
-└──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
-```
-
-- **Data sources** — encrypted credentials, connection tests, async schema introspection  
+- **Agent Mode** — chat workspace that connects databases, inspects schemas, builds queries, and ships live dashboards  
+- **Data sources** — encrypted credentials, connection tests + read-only user probe, schema introspection  
 - **Semantic engine** — AI/heuristic proposals + approve / reject workflow  
-- **Query engine** — QueryPlans → dialect SQL → execute + run history  
-- **Dashboard engine** — JSON specs, widget registry, grid layout, versioned edits  
-- **Security first** — Argon2id, Redis httpOnly sessions, AES-256-GCM secrets, no AI-executable frontend code  
+- **Query engine** — QueryPlans → dialect SQL + inferred joins → execute + run history  
+- **Dashboard engine** — JSON specs, widget registry (ECharts), grid layout, versioned edits  
+- **Security** — Argon2id, Redis httpOnly sessions, AES-256-GCM secrets, redacted agent logs  
 
 ---
 
@@ -129,23 +128,33 @@ flowchart LR
 
 ## Quick start
 
-**Requirements:** Node.js ≥ 20, pnpm 9, Docker (Postgres + Redis)
+**Requirements:** Docker + Docker Compose (Node/pnpm only needed for local hot-reload)
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+| Service | URL |
+| --- | --- |
+| Web | http://localhost:3100 |
+| API health | http://localhost:3101/api/v1/health |
+| Mailpit UI | http://localhost:8025 |
+
+One compose file builds `api` / `worker` / `web` from [`infrastructure/docker/Dockerfile`](infrastructure/docker/Dockerfile). Postgres and Redis stay on the internal network; Mailpit supplies SMTP.
+
+### Local pnpm (optional)
 
 ```bash
 cp .env.example .env
 pnpm install
 pnpm -r build
-docker compose up -d postgres redis
+docker compose --profile publish-data up -d postgres redis mailpit postgres-host redis-host
 pnpm db:migrate:deploy
 pnpm --filter @autobi/database generate
 pnpm -r --filter './packages/*' build
 pnpm dev
 ```
-
-| Service | URL |
-| --- | --- |
-| Web | http://localhost:3000 |
-| API health | http://localhost:3001/api/v1/health |
 
 Useful commands:
 
@@ -176,21 +185,9 @@ AutoBI/
 │   ├── contracts/    # Zod schemas
 │   ├── shared/       # Crypto, roles, errors
 │   └── config/       # Env validation
-└── docs/             # Architecture & engine guides
+├── infrastructure/docker/Dockerfile
+└── docs/
 ```
-
----
-
-## MVP status
-
-| Sprint | Focus | Status |
-| --- | --- | --- |
-| 1 | Foundation + DB connectivity | Done |
-| 2 | Semantic engine | Done |
-| 3 | Query engine | Done |
-| 4 | Dashboard engine | Done |
-
-Optional later: richer joins, NL dashboard edit, invites, e2e hardening, desktop packaging.
 
 ---
 
@@ -209,7 +206,7 @@ Optional later: richer joins, NL dashboard edit, invites, e2e hardening, desktop
 | [Database](docs/DATABASE.md) | Prisma / app DB |
 | [Development](docs/DEVELOPMENT.md) | Local workflow |
 | [PRD](docs/PRD.md) | Product requirements |
-| [Production readiness](docs/PRODUCTION_READINESS.md) | Gap analysis to ship |
+| [Deploy](docs/DEPLOY.md) | Compose & ops |
 
 ---
 
@@ -226,5 +223,6 @@ Details: [docs/SECURITY.md](docs/SECURITY.md)
 ---
 
 <p align="center">
-  <sub>Built as a modular TypeScript monorepo · MVP complete · ready to demo locally</sub>
+  <sub>Built as a modular TypeScript monorepo · AutoBI 1.0.0</sub><br/>
+  <sub>Special thanks to Morteza, the one who made this idea come to my mind</sub>
 </p>

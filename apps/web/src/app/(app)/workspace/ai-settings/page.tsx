@@ -1,9 +1,19 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { api, ApiError } from '@/lib/api';
+import { api, formatApiError } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
-import { Badge, Button, EmptyState, Field, Input, Select } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  InlineError,
+  InlineSuccess,
+  Input,
+  PageHeader,
+  Select,
+} from '@/components/ui';
 
 interface ProviderInfo {
   name: string;
@@ -21,6 +31,7 @@ export default function AiSettingsPage() {
   const { current } = useWorkspace();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [configs, setConfigs] = useState<Config[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [provider, setProvider] = useState('openai');
   const [model, setModel] = useState('gpt-4o-mini');
   const [apiKey, setApiKey] = useState('');
@@ -42,9 +53,10 @@ export default function AiSettingsPage() {
   }, [current?.id]);
 
   useEffect(() => {
+    if (editingId) return;
     const models = providers.find((p) => p.name === provider)?.models ?? [];
-    if (models[0]) setModel(models[0]);
-  }, [provider, providers]);
+    if (models[0] && !models.includes(model)) setModel(models[0]);
+  }, [provider, providers, editingId, model]);
 
   if (!current) {
     return (
@@ -53,6 +65,22 @@ export default function AiSettingsPage() {
         description="Create a workspace from the home page first."
       />
     );
+  }
+
+  function resetForm() {
+    setEditingId(null);
+    setProvider('openai');
+    setModel('gpt-4o-mini');
+    setApiKey('');
+  }
+
+  function startEdit(c: Config) {
+    setEditingId(c.id);
+    setProvider(c.provider);
+    setModel(c.model);
+    setApiKey('');
+    setError(null);
+    setMessage(null);
   }
 
   async function onSave(e: FormEvent) {
@@ -68,14 +96,22 @@ export default function AiSettingsPage() {
           workspaceId: current.id,
           provider,
           model,
-          apiKey,
+          ...(editingId ? { configId: editingId } : {}),
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         }),
       });
       setApiKey('');
-      setMessage('Provider saved. API key is encrypted and never returned.');
+      setMessage(
+        editingId
+          ? apiKey.trim()
+            ? 'Provider updated (API key rotated).'
+            : 'Provider updated (existing key kept).'
+          : 'Provider saved. API key is encrypted and never returned.',
+      );
+      setEditingId(null);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Save failed');
+      setError(formatApiError(err, 'Save failed'));
     } finally {
       setBusy(false);
     }
@@ -93,13 +129,14 @@ export default function AiSettingsPage() {
           workspaceId: current.id,
           provider,
           model,
-          apiKey: apiKey || undefined,
+          apiKey: apiKey.trim() || undefined,
+          configId: editingId || undefined,
         }),
       });
       setMessage(data.result.message);
       if (!data.result.ok) setError(data.result.message);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Test failed');
+      setError(formatApiError(err, 'Test failed'));
     } finally {
       setBusy(false);
     }
@@ -107,52 +144,94 @@ export default function AiSettingsPage() {
 
   async function onDelete(id: string) {
     if (!current) return;
-    await api(`/ai/providers/config/${id}?workspaceId=${current.id}`, { method: 'DELETE' });
-    await load();
+    if (!window.confirm('Remove this AI provider and its stored key?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/ai/providers/config/${id}?workspaceId=${current.id}`, { method: 'DELETE' });
+      if (editingId === id) resetForm();
+      setMessage('Provider removed.');
+      await load();
+    } catch (err) {
+      setError(formatApiError(err, 'Delete failed'));
+    } finally {
+      setBusy(false);
+    }
   }
+
+  const modelOptions = providers.find((p) => p.name === provider)?.models ?? [];
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-semibold">AI settings</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Configure workspace-level AI providers. Keys are encrypted at rest.
-        </p>
-      </div>
+      <PageHeader
+        title="AI settings"
+        description="Add your own OpenAI or OpenRouter API keys. Keys are encrypted at rest and never shown again."
+      />
 
       <form className="panel space-y-4 p-5" onSubmit={onSave}>
-        <Field label="Provider">
-          <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
-            {providers.map((p) => (
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-medium">{editingId ? 'Edit provider' : 'Add provider'}</h2>
+          {editingId ? (
+            <Button type="button" variant="ghost" onClick={resetForm}>
+              Cancel edit
+            </Button>
+          ) : null}
+        </div>
+        <Field label="Provider" htmlFor="ai-provider">
+          <Select
+            id="ai-provider"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            disabled={Boolean(editingId)}
+          >
+            {(providers.length
+              ? providers
+              : [
+                  { name: 'openai', models: [] },
+                  { name: 'openrouter', models: [] },
+                ]
+            ).map((p) => (
               <option key={p.name} value={p.name}>
                 {p.name}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="Model">
-          <Select value={model} onChange={(e) => setModel(e.target.value)}>
-            {(providers.find((p) => p.name === provider)?.models ?? []).map((m) => (
+        <Field label="Model" htmlFor="ai-model">
+          <Select
+            id="ai-model"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+          >
+            {modelOptions.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
             ))}
+            {model && !modelOptions.includes(model) ? (
+              <option value={model}>{model}</option>
+            ) : null}
           </Select>
         </Field>
-        <Field label="API key">
+        <Field
+          label={editingId ? 'API key (leave blank to keep current)' : 'API key'}
+          htmlFor="ai-key"
+        >
           <Input
+            id="ai-key"
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-            required
+            placeholder={editingId ? '•••••••• (unchanged)' : 'sk-... or or-...'}
+            required={!editingId}
+            autoComplete="off"
           />
         </Field>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {message && <p className="text-sm text-emerald-700 dark:text-emerald-300">{message}</p>}
-        <div className="flex gap-2">
+        <InlineError>{error}</InlineError>
+        <InlineSuccess>{message}</InlineSuccess>
+        <div className="flex flex-wrap gap-2">
           <Button type="submit" disabled={busy}>
-            Save
+            {busy ? 'Saving…' : editingId ? 'Update' : 'Save'}
           </Button>
           <Button type="button" variant="secondary" disabled={busy} onClick={onTest}>
             Test connection
@@ -160,29 +239,32 @@ export default function AiSettingsPage() {
         </div>
       </form>
 
-      <div className="panel p-5">
+      <div className="panel space-y-4 p-5">
         <h2 className="font-medium">Saved configurations</h2>
-        <div className="mt-4 space-y-3">
+        <div className="space-y-3">
           {configs.map((c) => (
             <div
               key={c.id}
-              className="flex items-center justify-between rounded-xl border border-line px-3 py-2"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-line px-3 py-2"
             >
               <div>
                 <div className="font-medium">{c.provider}</div>
                 <div className="text-sm text-ink-muted">{c.model}</div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="success">key stored</Badge>
-                <Button variant="ghost" onClick={() => onDelete(c.id)}>
-                  Delete
+                <Button variant="secondary" disabled={busy} onClick={() => startEdit(c)}>
+                  Edit
+                </Button>
+                <Button variant="ghost" disabled={busy} onClick={() => onDelete(c.id)}>
+                  Remove
                 </Button>
               </div>
             </div>
           ))}
-          {!configs.length && (
-            <p className="text-sm text-ink-muted">No providers configured yet.</p>
-          )}
+          {!configs.length ? (
+            <p className="text-sm text-ink-muted">No providers yet. Add an API key above.</p>
+          ) : null}
         </div>
       </div>
     </div>

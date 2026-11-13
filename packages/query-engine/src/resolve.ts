@@ -33,9 +33,8 @@ function allowField(ctx: QueryCompileContext, field: string): void {
 function selectMetrics(ctx: QueryCompileContext) {
   const all = ctx.metrics ?? [];
   if (ctx.preferApprovedSemantics) {
-    const approved = all.filter((m) => m.status === 'Approved');
-    if (approved.length) return approved;
-    return all.filter((m) => m.status === 'Proposed');
+    // Fail closed: never fall back to Proposed when Approved is preferred.
+    return all.filter((m) => m.status === 'Approved');
   }
   return all.filter((m) => m.status !== 'Rejected');
 }

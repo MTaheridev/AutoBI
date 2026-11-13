@@ -5,3 +5,4 @@ export * from './context.js';
 export * from './heuristic.js';
 export * from './approval.js';
 export * from './prompt.js';
+export * from './validate-proposal.js';

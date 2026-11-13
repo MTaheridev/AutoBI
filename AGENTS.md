@@ -48,6 +48,16 @@ pnpm test
 - AI must not execute arbitrary SQL in MVP
 - No AI-generated executable frontend code
 
+## Agent Mode skills
+
+Runtime BI skills for `/workspace/agent` live in `apps/api/src/agent/skills/` (loaded into the system prompt). Keep them aligned with anti-hallucination, anti-rogue, clarify-before-act, datasource onboarding, and semantic-first BI.
+
+## App UX
+
+- Default logged-in landing is **Agent Mode** (`/workspace/agent`)
+- Agent surface also includes dashboards (same layout, no sidebar)
+- **Workshop** is a separate manual/dev shell — only after the Agent **Workshop** control
+
 ## Docs
 
 See `docs/` for architecture, connectors, security, and development setup.

@@ -5,4 +5,5 @@ export * from './context.js';
 export * from './identifiers.js';
 export * from './resolve.js';
 export * from './compile.js';
+export * from './joins.js';
 export * from './safety.js';

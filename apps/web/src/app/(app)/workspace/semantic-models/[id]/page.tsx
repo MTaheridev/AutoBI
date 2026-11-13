@@ -198,7 +198,7 @@ export default function SemanticModelDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-semibold">{model.name}</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">{model.name}</h1>
           <p className="mt-1 text-sm text-ink-muted">
             Version {model.version} · {counts.proposed} proposed · {counts.approved} approved
           </p>
@@ -251,7 +251,7 @@ export default function SemanticModelDetailPage() {
               <button
                 key={key}
                 type="button"
-                className={`rounded-xl px-3 py-1.5 text-sm ${
+                className={`rounded-control px-3 py-1.5 text-sm ${
                   tab === key
                     ? 'bg-brand-600/10 font-medium text-brand-700 dark:text-brand-300'
                     : 'text-ink-muted hover:bg-surface-muted'
